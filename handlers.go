@@ -71,9 +71,9 @@ func handleNodeCreate(w http.ResponseWriter, r *http.Request) {
 	node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
 	now := time.Now().Unix()
 
-	db.Exec(`INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, created_at, modified_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, now, now)
+	db.Exec(`INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, site_id, created_at, modified_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, node.SiteID, now, now)
 
 	// Create initial version
 	versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())

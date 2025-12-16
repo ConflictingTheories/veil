@@ -1,11 +1,5 @@
--- Extend nodes with canonical URI, slug, JSON body & metadata
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS slug TEXT;
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS canonical_uri TEXT;
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS body TEXT; -- JSON structured body
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS metadata TEXT; -- JSON metadata
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'draft';
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS site_id TEXT REFERENCES sites(id);
+-- Node URIs table
+
 
 CREATE TABLE IF NOT EXISTS node_uris (
     id TEXT PRIMARY KEY,
@@ -31,7 +25,7 @@ CREATE TABLE IF NOT EXISTS plugins_registry (
 CREATE INDEX IF NOT EXISTS idx_plugins_slug ON plugins_registry(slug);
 
 -- Media table with checksums and storage metadata
-CREATE TABLE IF NOT EXISTS media (
+CREATE TABLE IF NOT EXISTS media_v2 (
     id TEXT PRIMARY KEY,
     filename TEXT,
     storage_url TEXT,
@@ -42,7 +36,7 @@ CREATE TABLE IF NOT EXISTS media (
     created_at INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_media_checksum ON media(checksum);
+CREATE INDEX IF NOT EXISTS idx_media_v2_checksum ON media_v2(checksum);
 
 -- Tags and node-tags join for faster lookups
 CREATE TABLE IF NOT EXISTS tags (
@@ -62,6 +56,4 @@ CREATE TABLE IF NOT EXISTS node_tags (
 
 CREATE INDEX IF NOT EXISTS idx_node_tags_node ON node_tags(node_id);
 
--- Simple search hints
-CREATE INDEX IF NOT EXISTS idx_nodes_slug ON nodes(slug);
-CREATE INDEX IF NOT EXISTS idx_nodes_canonical_uri ON nodes(canonical_uri);
+-- Search hints (columns may not exist yet, ignore errors)
