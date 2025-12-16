@@ -32,10 +32,19 @@ function setupEventListeners() {
             currentNode.title = document.getElementById('editor').value.split('\n')[0] || 'Untitled';
             updatePreview();
             updateWordCount();
-            if (autoSaveEnabled) triggerAutoSave();
+            if (autoSaveEnabled) {
+                console.debug('Editor changed: scheduling autosave');
+                triggerAutoSave();
+            }
         }
     }, 500));
-    
+
+    // Save button (manual)
+    document.getElementById('saveBtn')?.addEventListener('click', async () => {
+        showStatusBadge('Saving...', 'yellow');
+        await saveCurrentNode();
+    });
+
     // Toolbar
     document.getElementById('boldBtn')?.addEventListener('click', () => insertMarkdown('**', '**', 'bold text'));
     document.getElementById('italicBtn')?.addEventListener('click', () => insertMarkdown('*', '*', 'italic text'));
@@ -49,11 +58,12 @@ function setupEventListeners() {
     // Modals
     document.querySelectorAll('[data-modal-close]').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const modal = e.target.closest('.modal-overlay');
+            // Use the button element (btn) to find the containing overlay reliably
+            const modal = btn.closest('.modal-overlay');
             if (modal) closeModal(modal.id);
         });
     });
-    
+
     document.querySelectorAll('.modal-overlay').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeModal(modal.id);
@@ -71,10 +81,31 @@ function setupEventListeners() {
 async function loadSites() {
     try {
         const resp = await fetch('/api/sites');
-        allSites = await resp.json() || [];
+        if (!resp.ok) {
+            const txt = await resp.text().catch(() => resp.statusText || 'Unknown error');
+            console.error('Failed to load sites:', resp.status, txt);
+            allSites = [];
+            renderSitesList();
+            return;
+        }
+
+        const data = await resp.json();
+        // Accept either an array or an object like { sites: [...] }
+        if (Array.isArray(data)) {
+            allSites = data;
+        } else if (data && Array.isArray(data.sites)) {
+            allSites = data.sites;
+        } else {
+            // Unexpected shape - reset to empty array and log
+            console.warn('Unexpected /api/sites response shape, resetting sites list', data);
+            allSites = [];
+        }
+
         renderSitesList();
     } catch (e) {
         console.error('Failed to load sites:', e);
+        allSites = [];
+        renderSitesList();
     }
 }
 
@@ -93,7 +124,7 @@ function renderSitesList() {
 }
 
 async function selectSite(siteId) {
-    const site = allSites.find(s => s.id === siteId);
+    const site = (allSites || []).find(s => s.id === siteId);
     if (!site) return;
     
     currentSite = site;
@@ -118,7 +149,17 @@ async function createNewSite() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, description, type: 'project' })
         });
+
+        if (!resp.ok) {
+            const errBody = await resp.json().catch(() => ({ error: resp.statusText }));
+            console.error('Create site failed:', resp.status, errBody);
+            alert('Failed to create site: ' + (errBody.error || resp.statusText));
+            return;
+        }
+
         const site = await resp.json();
+        // Ensure allSites is an array before pushing
+        if (!Array.isArray(allSites)) allSites = [];
         allSites.push(site);
         renderSitesList();
         await selectSite(site.id);
@@ -135,10 +176,29 @@ async function loadNodes() {
     
     try {
         const resp = await fetch(`/api/sites/${currentSite.id}/nodes`);
-        allNodes = await resp.json() || [];
+        if (!resp.ok) {
+            const txt = await resp.text().catch(() => resp.statusText || 'Unknown error');
+            console.error('Failed to load nodes:', resp.status, txt);
+            allNodes = [];
+            renderNodesList();
+            return;
+        }
+
+        const data = await resp.json();
+        if (Array.isArray(data)) {
+            allNodes = data;
+        } else if (data && Array.isArray(data.nodes)) {
+            allNodes = data.nodes;
+        } else {
+            console.warn('Unexpected /api/sites/:id/nodes response shape, resetting nodes list', data);
+            allNodes = [];
+        }
+
         renderNodesList();
     } catch (e) {
         console.error('Failed to load nodes:', e);
+        allNodes = [];
+        renderNodesList();
     }
 }
 
@@ -183,7 +243,15 @@ function filterNodes(query) {
 async function openNode(nodeId) {
     try {
         const resp = await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}`);
-        currentNode = await resp.json();
+        if (!resp.ok) {
+            const body = await resp.text().catch(() => resp.statusText || 'Unknown error');
+            console.error('Failed to open node, server responded', resp.status, body);
+            alert('Failed to open node');
+            return;
+        }
+
+        const node = await resp.json();
+        currentNode = node;
         
         document.getElementById('editor').value = currentNode.content || '';
         document.getElementById('breadcrumb').innerHTML = `<span>${currentNode.title || 'Untitled'}</span>`;
@@ -207,45 +275,106 @@ async function createNewNote() {
     
     const title = prompt('Note title:');
     if (!title) return;
-    
-    try {
-        const resp = await fetch(`/api/sites/${currentSite.id}/nodes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type: 'note',
-                path: title.toLowerCase().replace(/\s+/g, '-') + '.md',
-                title: title,
-                content: '# ' + title + '\n\n',
-                mime_type: 'text/markdown'
-            })
-        });
-        const node = await resp.json();
-        allNodes.push(node);
-        renderNodesList();
-        await openNode(node.id);
-        alert(`✓ Note created: ${title}`);
-    } catch (e) {
-        console.error('Failed to create note:', e);
-        alert('Failed to create note');
+
+    async function tryCreate(noteTitle, attempt = 1) {
+        try {
+            const path = noteTitle.toLowerCase().replace(/\s+/g, '-') + '.md';
+            const resp = await fetch(`/api/sites/${currentSite.id}/nodes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'note',
+                    path: path,
+                    title: noteTitle,
+                    content: '# ' + noteTitle + '\n\n',
+                    mime_type: 'text/markdown'
+                })
+            });
+
+            if (!resp.ok) {
+                const errBody = await resp.json().catch(() => ({ error: resp.statusText }));
+                console.error('Create note failed:', resp.status, errBody);
+
+                // If it's a conflict (duplicate path), try once with a unique suffix
+                if (resp.status === 409 && attempt === 1) {
+                    const uniqueTitle = noteTitle + ' ' + Date.now();
+                    return await tryCreate(uniqueTitle, 2);
+                }
+
+                alert('Failed to create note: ' + (errBody.error || resp.statusText));
+                return;
+            }
+
+            const node = await resp.json();
+            if (!Array.isArray(allNodes)) allNodes = [];
+            // Reload nodes from server to ensure authoritative data (and site assignment)
+            await loadNodes();
+            // Find the created node in the refreshed list (prefer server-provided id)
+            let created = null;
+            if (node && node.id) {
+                created = (allNodes || []).find(n => n.id === node.id);
+            }
+            if (!created) {
+                // try match by path and title (best-effort)
+                created = (allNodes || []).find(n => n.path === node.path && n.title === node.title);
+            }
+            if (created && created.id) {
+                renderNodesList();
+                await openNode(created.id);
+                alert(`✓ Note created: ${created.title}`);
+            } else if (node && node.id) {
+                // Fallback to returned id if was provided
+                renderNodesList();
+                await openNode(node.id).catch(() => alert('Note created but failed to open'));
+            } else {
+                renderNodesList();
+                alert('Note created but could not locate it in the site');
+            }
+        } catch (e) {
+            console.error('Failed to create note:', e);
+            alert('Failed to create note');
+        }
     }
+
+    await tryCreate(title);
 }
 
 // ====== EDITING ======
 async function saveCurrentNode() {
-    if (!currentNode || !currentSite) return;
+    if (!currentNode || !currentSite) {
+        console.warn('No current node/site to save');
+        return;
+    }
     
     currentNode.content = document.getElementById('editor').value;
     currentNode.title = currentNode.content.split('\n')[0] || 'Untitled';
-    
+
     try {
-        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}`, {
+        const resp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(currentNode)
         });
-        
+
+        if (!resp.ok) {
+            const body = await resp.text().catch(() => resp.statusText || 'Unknown error');
+            console.error('Save failed, server responded:', resp.status, body);
+            showStatusBadge('Save failed', 'red');
+            return;
+        }
+
+        // Update UI state
         showStatusBadge('Saved', 'green');
+        // Update nodes list (title may have changed)
+        // Persist local currentNode changes to allNodes array so UI reflects edits immediately
+        if (Array.isArray(allNodes)) {
+            const idx = allNodes.findIndex(n => n.id === currentNode.id);
+            if (idx !== -1) {
+                allNodes[idx].title = currentNode.title;
+                allNodes[idx].content = currentNode.content;
+            }
+        }
+        renderNodesList();
     } catch (e) {
         console.error('Save failed:', e);
         showStatusBadge('Save failed', 'red');
@@ -255,7 +384,11 @@ async function saveCurrentNode() {
 function triggerAutoSave() {
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
-        if (currentNode && autoSaveEnabled) saveCurrentNode();
+        if (currentNode && autoSaveEnabled) {
+            console.debug('Auto-save triggered');
+            showStatusBadge('Auto-saving...', 'yellow');
+            saveCurrentNode();
+        }
     }, 3000);
 }
 
@@ -339,22 +472,28 @@ async function rollbackVersion(versionId) {
 
 // ====== REFERENCES ======
 async function loadReferences() {
-    if (!currentNode || !currentSite) return;
+    if (!currentNode || !currentSite || !currentNode.id) return;
     
     try {
         const backResp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/backlinks`);
-        const backlinks = await backResp.json() || [];
+        if (!backResp.ok) {
+            document.getElementById('backlinks').innerHTML = '<li class="text-slate-500">Failed to load backlinks</li>';
+        } else {
+            const backlinks = await backResp.json() || [];
+            document.getElementById('backlinks').innerHTML = (backlinks || []).length ?
+                (backlinks || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">← ${r.link_text || 'Link'}</li>`).join('') :
+                '<li class="text-slate-500">No backlinks</li>';
+        }
         
         const fwdResp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/references`);
-        const references = await fwdResp.json() || [];
-        
-        document.getElementById('backlinks').innerHTML = (backlinks || []).length ?
-            (backlinks || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">← ${r.link_text || 'Link'}</li>`).join('') :
-            '<li class="text-slate-500">No backlinks</li>';
-        
-        document.getElementById('forwardlinks').innerHTML = (references || []).length ?
-            (references || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">→ ${r.link_text || 'Link'}</li>`).join('') :
-            '<li class="text-slate-500">No links</li>';
+        if (!fwdResp.ok) {
+            document.getElementById('forwardlinks').innerHTML = '<li class="text-slate-500">Failed to load links</li>';
+        } else {
+            const references = await fwdResp.json() || [];
+            document.getElementById('forwardlinks').innerHTML = (references || []).length ?
+                (references || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">→ ${r.link_text || 'Link'}</li>`).join('') :
+                '<li class="text-slate-500">No links</li>';
+        }
     } catch (e) {
         console.error('Failed to load references:', e);
     }
@@ -422,12 +561,23 @@ function insertMarkdown(before, after, placeholder) {
 
 function openModal(id) {
     const modal = document.getElementById(id);
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        // Prevent background scroll while modal is open
+        document.body.style.overflow = 'hidden';
+        // Focus first interactive element for accessibility
+        const first = modal.querySelector('input, button, textarea, [tabindex]');
+        if (first) first.focus();
+    }
 }
 
 function closeModal(id) {
     const modal = document.getElementById(id);
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        // Restore scroll
+        document.body.style.overflow = '';
+    }
 }
 
 function showStatusBadge(message, color = 'green') {

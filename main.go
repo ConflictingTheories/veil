@@ -236,6 +236,11 @@ func serve() {
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
+
+	// Ensure migrations are applied on server start so the default DB has required tables
+	if err := applyMigrations(db); err != nil {
+		log.Printf("Warning: migrations had errors: %v", err)
+	}
 	defer db.Close()
 
 	// Initialize plugin systems
@@ -255,6 +260,11 @@ func gui() {
 	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
+	}
+
+	// Apply migrations in GUI mode as well
+	if err := applyMigrations(db); err != nil {
+		log.Printf("Warning: migrations had errors: %v", err)
 	}
 	defer db.Close()
 
@@ -286,6 +296,11 @@ func gui() {
 
 func setupRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// Serve a no-content favicon to avoid 404 noise in browser consoles
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	// Static files
 	webFS, _ := fs.Sub(webUI, "web")
@@ -920,11 +935,21 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			var node Node
 			var createdAt, modifiedAt int64
 			err := db.QueryRow(`
-				SELECT id, type, parent_id, path, title, content, mime_type, created_at, modified_at, visibility
+				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), created_at, modified_at
 				FROM nodes WHERE id = ? AND site_id = ?
-			`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title, &node.Content, &node.MimeType, &createdAt, &modifiedAt, &node.Visibility)
+			`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title, &node.Content, &node.MimeType, &createdAt, &modifiedAt)
 
 			if err != nil {
+				// Debug: log more details to help diagnose why a node that should exist isn't found
+				log.Printf("Node lookup failed: id=%s site=%s err=%v", nodeID, siteID, err)
+				var count int
+				err2 := db.QueryRow(`SELECT COUNT(1) FROM nodes WHERE id = ? AND site_id = ?`, nodeID, siteID).Scan(&count)
+				if err2 != nil {
+					log.Printf("Node lookup count query failed: %v", err2)
+				} else {
+					log.Printf("Node lookup count for id=%s site=%s -> %d", nodeID, siteID, count)
+				}
+
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Node not found"})
 				return
@@ -936,7 +961,7 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 		} else {
 			// GET /api/sites/site_123/nodes
 			rows, err := db.Query(`
-				SELECT id, type, parent_id, path, title, content, mime_type, created_at, modified_at, visibility
+				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), created_at, modified_at
 				FROM nodes WHERE site_id = ? ORDER BY created_at DESC
 			`, siteID)
 			if err != nil {
@@ -946,11 +971,11 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			}
 			defer rows.Close()
 
-			var nodes []Node
+			nodes := make([]Node, 0)
 			for rows.Next() {
 				var n Node
 				var createdAt, modifiedAt int64
-				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &createdAt, &modifiedAt, &n.Visibility)
+				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &createdAt, &modifiedAt)
 				if err != nil {
 					continue
 				}
@@ -966,15 +991,31 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 		var node Node
 		json.NewDecoder(r.Body).Decode(&node)
 
+		// Ensure unique path within site
+		var exists int
+		err := db.QueryRow(`SELECT COUNT(1) FROM nodes WHERE site_id = ? AND path = ?`, siteID, node.Path).Scan(&exists)
+		if err == nil && exists > 0 {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Node path already exists in this site"})
+			return
+		}
+
 		node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
 		now := time.Now().Unix()
 
-		_, err := db.Exec(`
+		_, err = db.Exec(`
 			INSERT INTO nodes (id, type, path, title, content, mime_type, created_at, modified_at, site_id)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, now, now, siteID)
 
 		if err != nil {
+			// Convert DB-level unique constraint errors into a 409 Conflict so clients can handle them
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: nodes.path") || strings.Contains(err.Error(), "constraint failed: UNIQUE constraint failed: nodes.path") {
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Node path already exists in this site"})
+				return
+			}
+
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
@@ -1027,4 +1068,41 @@ func markdownToHTML(md string) string {
 	// Line breaks
 	html = strings.ReplaceAll(html, "\n", "<br>\n")
 	return html
+}
+
+// applyMigrations runs embedded SQL migration files against the provided database.
+// It logs warnings for individual statements but attempts to apply all migrations.
+func applyMigrations(database *sql.DB) error {
+	migrationFiles, err := fs.ReadDir(migrations, "migrations")
+	if err != nil {
+		return err
+	}
+
+	// Sort migration files by name to ensure proper order
+	sort.Slice(migrationFiles, func(i, j int) bool {
+		return migrationFiles[i].Name() < migrationFiles[j].Name()
+	})
+
+	for _, file := range migrationFiles {
+		content, _ := migrations.ReadFile("migrations/" + file.Name())
+		statements := strings.Split(string(content), ";")
+		for _, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, err := database.Exec(stmt); err != nil {
+				// Some SQL engines or older SQLite versions may not support certain clauses
+				// (e.g., ALTER TABLE ... ADD COLUMN IF NOT EXISTS), and migrations may be re-run.
+				// Treat 'already exists' and known benign syntax errors as non-fatal.
+				if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "near \"EXISTS\": syntax error") {
+					// ignore
+					continue
+				}
+				log.Printf("Migration %s statement error: %v\n", file.Name(), err)
+			}
+		}
+	}
+
+	return nil
 }
