@@ -932,7 +932,12 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 
 			switch action {
 			case "versions":
-				handleNodeVersions(w, r, siteID, nodeID)
+				if len(parts) > 7 && parts[7] == "rollback" {
+					// Rollback to specific version
+					handleVersionRollback(w, r, siteID, nodeID, parts[7])
+				} else {
+					handleNodeVersions(w, r, siteID, nodeID)
+				}
 			case "publish":
 				handleNodePublish(w, r, siteID, nodeID)
 			case "tags":
