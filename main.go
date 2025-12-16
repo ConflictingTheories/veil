@@ -945,16 +945,31 @@ func handleNodeTags(w http.ResponseWriter, r *http.Request) {
 
 // === API Handlers - Media ===
 func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	r.ParseMultipartForm(10 << 20)
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 
-	file, handler, _ := r.FormFile("file")
+	err := r.ParseMultipartForm(32 << 20) // 32 MB max
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to parse form"})
+		return
+	}
+
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "no file uploaded"})
+		return
+	}
 	defer file.Close()
 
 	buf := new(bytes.Buffer)
 	io.Copy(buf, file)
+	content := buf.Bytes()
 
-	hash := md5.Sum(buf.Bytes())
+	hash := md5.Sum(content)
 	hashStr := fmt.Sprintf("%x", hash)
 
 	mediaID := fmt.Sprintf("media_%d", time.Now().UnixNano())
@@ -964,11 +979,11 @@ func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll("./media", 0755)
 	filename := fmt.Sprintf("%s_%s", mediaID, handler.Filename)
 	fpath := filepath.Join("media", filename)
-	os.WriteFile(fpath, buf.Bytes(), 0644)
+	os.WriteFile(fpath, content, 0644)
 
-	_, err := db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at)
+	_, err = db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		mediaID, handler.Filename, fpath, hashStr, handler.Header.Get("Content-Type"), buf.Len(), "", now)
+		mediaID, handler.Filename, fpath, hashStr, handler.Header.Get("Content-Type"), len(content), "", now)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1255,10 +1270,172 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 
 	siteID := parts[3]
 
-	// Route to appropriate handler
+	// Route to appropriate handler based on path structure
 	if len(parts) > 4 && parts[4] == "nodes" {
-		handleSiteNodes(w, r, siteID)
+		if len(parts) > 6 {
+			// Sub-resources: /api/sites/site_123/nodes/node_456/versions or /publish etc
+			nodeID := parts[5]
+			action := parts[6]
+
+			switch action {
+			case "versions":
+				handleNodeVersions(w, r, siteID, nodeID)
+			case "publish":
+				handleNodePublish(w, r, siteID, nodeID)
+			case "tags":
+				handleNodeTagsNested(w, r, siteID, nodeID)
+			case "media":
+				handleNodeMedia(w, r, siteID, nodeID)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		} else {
+			// /api/sites/site_123/nodes or /api/sites/site_123/nodes/node_456
+			handleSiteNodes(w, r, siteID)
+		}
 	}
+}
+
+// Handle node versions for a specific site/node
+func handleNodeVersions(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "GET" {
+		rows, err := db.Query(`
+			SELECT id, node_id, version_number, content, title, status, published_at, created_at, modified_at, is_current
+			FROM versions WHERE node_id = ? ORDER BY version_number DESC
+		`, nodeID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		versions := []Version{}
+		for rows.Next() {
+			var v Version
+			var created, modified int64
+			var published sql.NullInt64
+			rows.Scan(&v.ID, &v.NodeID, &v.VersionNumber, &v.Content, &v.Title, &v.Status, &published, &created, &modified, &v.IsCurrent)
+			v.CreatedAt = time.Unix(created, 0)
+			v.ModifiedAt = time.Unix(modified, 0)
+			if published.Valid {
+				t := time.Unix(published.Int64, 0)
+				v.PublishedAt = &t
+			}
+			versions = append(versions, v)
+		}
+		json.NewEncoder(w).Encode(versions)
+	}
+}
+
+// Handle node publish for a specific site/node
+func handleNodePublish(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "POST" {
+		var req map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		visibility := "public"
+		if v, ok := req["visibility"].(string); ok {
+			visibility = v
+		}
+
+		now := time.Now().Unix()
+
+		// Update node status
+		_, err := db.Exec(`
+			UPDATE nodes 
+			SET status = 'published', visibility = ?, modified_at = ?
+			WHERE id = ? AND site_id = ?
+		`, visibility, now, nodeID, siteID)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		// Update current version
+		db.Exec(`
+			UPDATE versions 
+			SET status = 'published', published_at = ?
+			WHERE node_id = ? AND is_current = 1
+		`, now, nodeID)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "published",
+			"visibility": visibility,
+		})
+	}
+}
+
+// Handle node tags nested route
+func handleNodeTagsNested(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "POST" {
+		var req map[string]string
+		json.NewDecoder(r.Body).Decode(&req)
+
+		tagName := req["name"]
+		if tagName == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tag name required"})
+			return
+		}
+
+		// Get or create tag
+		var tagID string
+		err := db.QueryRow(`SELECT id FROM tags WHERE name = ?`, tagName).Scan(&tagID)
+		if err != nil {
+			tagID = fmt.Sprintf("tag_%d", time.Now().UnixNano())
+			db.Exec(`INSERT INTO tags (id, name) VALUES (?, ?)`, tagID, tagName)
+		}
+
+		// Link tag to node
+		ntID := fmt.Sprintf("nt_%d", time.Now().UnixNano())
+		_, err = db.Exec(`
+			INSERT OR IGNORE INTO node_tags (id, node_id, tag_id) VALUES (?, ?, ?)
+		`, ntID, nodeID, tagID)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "added",
+			"tag":    tagName,
+		})
+	} else if r.Method == "GET" {
+		// Get tags for node
+		rows, _ := db.Query(`
+			SELECT t.id, t.name, t.color
+			FROM tags t
+			JOIN node_tags nt ON t.id = nt.tag_id
+			WHERE nt.node_id = ?
+		`, nodeID)
+		defer rows.Close()
+
+		tags := []Tag{}
+		for rows.Next() {
+			var t Tag
+			rows.Scan(&t.ID, &t.Name, &t.Color)
+			tags = append(tags, t)
+		}
+		json.NewEncoder(w).Encode(tags)
+	}
+}
+
+// Handle node media
+func handleNodeMedia(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
+	w.Header().Set("Content-Type", "application/json")
+	// TODO: Implement media upload/management for node
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
 }
 
 func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {

@@ -853,3 +853,98 @@ async function exportCurrentSite() {
         alert('Failed to export site');
     }
 }
+
+// ====== PLUGIN CONFIGURATION ======
+
+async function saveGitConfig() {
+    const repo = document.getElementById('gitRepo')?.value;
+    if (!repo) {
+        alert('Please enter a repository URL');
+        return;
+    }
+    
+    try {
+        await fetch('/api/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'git_repo', value: repo })
+        });
+        showToast('Git configuration saved', 'success');
+    } catch (e) {
+        console.error('Failed to save git config:', e);
+        alert('Failed to save configuration');
+    }
+}
+
+async function saveIPFSConfig() {
+    const gateway = document.getElementById('ipfsGateway')?.value;
+    if (!gateway) return;
+    
+    try {
+        await fetch('/api/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'ipfs_gateway', value: gateway })
+        });
+        showToast('IPFS configuration saved', 'success');
+    } catch (e) {
+        console.error('Failed to save IPFS config:', e);
+        alert('Failed to save configuration');
+    }
+}
+
+async function publishToIPFS() {
+    if (!currentSite) {
+        alert('Please select a site first');
+        return;
+    }
+    
+    try {
+        showStatusBadge('Publishing to IPFS...', 'yellow');
+        const resp = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'ipfs',
+                action: 'publish',
+                payload: { site_id: currentSite.id }
+            })
+        });
+        
+        const result = await resp.json();
+        showStatusBadge('Published to IPFS!', 'green');
+        showToast(`Published! CID: ${result.cid || 'N/A'}`, 'success');
+    } catch (e) {
+        console.error('IPFS publish failed:', e);
+        showStatusBadge('Publish failed', 'red');
+        alert('Failed to publish to IPFS');
+    }
+}
+
+async function saveNamecheapConfig() {
+    const apiKey = document.getElementById('namecheapKey')?.value;
+    const domain = document.getElementById('namecheapDomain')?.value;
+    
+    if (!apiKey || !domain) {
+        alert('Please fill in all fields');
+        return;
+    }
+    
+    try {
+        await fetch('/api/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'namecheap_key', value: apiKey })
+        });
+        await fetch('/api/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'namecheap_domain', value: domain })
+        });
+        showToast('Namecheap credentials saved', 'success');
+    } catch (e) {
+        console.error('Failed to save Namecheap config:', e);
+        alert('Failed to save credentials');
+    }
+}
+

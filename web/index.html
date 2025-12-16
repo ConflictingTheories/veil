@@ -322,15 +322,120 @@
 
 <!-- Plugins Modal -->
 <div id="pluginsModal" class="modal-overlay hidden">
-    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
         <div class="p-6 border-b border-slate-200 flex justify-between items-center">
-            <h2 class="text-lg font-bold text-slate-900">Plugins</h2>
+            <h2 class="text-lg font-bold text-slate-900">Plugins & Publishing Channels</h2>
             <button data-modal-close class="text-slate-500 hover:text-slate-700 text-xl">
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <div class="p-6">
-            <div id="pluginsList" class="space-y-3"></div>
+        <div class="p-6 overflow-y-auto flex-1">
+            <div class="space-y-6">
+                <!-- Git Integration -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fab fa-git-alt text-2xl text-orange-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Git Integration</h3>
+                                <p class="text-xs text-slate-500">Sync to repositories</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="git">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2">
+                        <div class="flex gap-2">
+                            <input type="text" placeholder="Repository URL" class="flex-1 px-3 py-2 border rounded text-xs" id="gitRepo">
+                            <button onclick="saveGitConfig()" class="px-3 py-2 bg-indigo-600 text-white rounded text-xs">Save</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IPFS Publishing -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-cube text-2xl text-teal-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">IPFS Publishing</h3>
+                                <p class="text-xs text-slate-500">Decentralized hosting</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="ipfs">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600">
+                        <div class="flex gap-2">
+                            <input type="text" placeholder="IPFS Gateway URL" value="http://localhost:5001" class="flex-1 px-3 py-2 border rounded text-xs" id="ipfsGateway">
+                            <button onclick="saveIPFSConfig()" class="px-3 py-2 bg-indigo-600 text-white rounded text-xs">Save</button>
+                        </div>
+                        <button onclick="publishToIPFS()" class="mt-2 w-full px-3 py-2 bg-teal-600 text-white rounded text-xs hover:bg-teal-700">
+                            <i class="fas fa-upload mr-1"></i> Publish Current Site to IPFS
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Namecheap DNS -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-globe text-2xl text-blue-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Namecheap DNS</h3>
+                                <p class="text-xs text-slate-500">Domain management</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="namecheap">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2">
+                        <input type="text" placeholder="API Key" class="w-full px-3 py-2 border rounded text-xs" id="namecheapKey">
+                        <input type="text" placeholder="Domain" class="w-full px-3 py-2 border rounded text-xs" id="namecheapDomain">
+                        <button onclick="saveNamecheapConfig()" class="w-full px-3 py-2 bg-indigo-600 text-white rounded text-xs">Save Credentials</button>
+                    </div>
+                </div>
+
+                <!-- Media Plugin -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-images text-2xl text-purple-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Media Processor</h3>
+                                <p class="text-xs text-slate-500">Image/video optimization</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="media" checked>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- SVG/Shader Editors -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-paint-brush text-2xl text-pink-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Creative Tools</h3>
+                                <p class="text-xs text-slate-500">SVG & Shader editors</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="svg" checked>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
