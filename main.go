@@ -33,6 +33,22 @@ var migrations embed.FS
 var db *sql.DB
 var dbPath string
 
+// === Node Types ===
+const (
+	NodeTypeNote        = "note"
+	NodeTypePage        = "page"
+	NodeTypePost        = "post"
+	NodeTypeCanvas      = "canvas"
+	NodeTypeShaderDemo  = "shader-demo"
+	NodeTypeCodeSnippet = "code-snippet"
+	NodeTypeImage       = "image"
+	NodeTypeVideo       = "video"
+	NodeTypeAudio       = "audio"
+	NodeTypeDocument    = "document"
+	NodeTypeTodo        = "todo"
+	NodeTypeReminder    = "reminder"
+)
+
 // === Types ===
 type Node struct {
 	ID           string    `json:"id"`
@@ -273,6 +289,7 @@ func serve() {
 	// Initialize plugin systems
 	initPluginRegistry()
 	initCredentialManager()
+	initURIResolver()
 	// Load enabled plugins from DB and register them at runtime
 	loadEnabledPluginsFromDB()
 
@@ -300,6 +317,7 @@ func gui() {
 	// Initialize plugin systems
 	initPluginRegistry()
 	initCredentialManager()
+	initURIResolver()
 	loadEnabledPluginsFromDB()
 
 	mux := setupRoutes()
@@ -342,6 +360,9 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/node-create", handleNodeCreate)
 	mux.HandleFunc("/api/node-update", handleNodeUpdate)
 	mux.HandleFunc("/api/node-delete", handleNodeDelete)
+
+	// Universal URI system
+	mux.HandleFunc("/veil/", handleUniversalURI)
 
 	// Version control
 	mux.HandleFunc("/api/versions", handleVersions)
@@ -395,6 +416,8 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/publish-job", handlePublishJob)
 	mux.HandleFunc("/api/plugins-registry", handlePluginsRegistry)
 	mux.HandleFunc("/api/node-uris", handleNodeURIs)
+	mux.HandleFunc("/api/resolve-uri", handleResolveURI)
+	mux.HandleFunc("/api/generate-uri", handleGenerateURI)
 
 	return mux
 }
@@ -669,53 +692,120 @@ func handleResolveLink(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(node)
 }
 
-// === API Handlers - Node URIs ===
-func handleNodeURIs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func handleUniversalURI(w http.ResponseWriter, r *http.Request) {
+	// Extract URI from path: /veil/site/path/entity
+	path := strings.TrimPrefix(r.URL.Path, "/veil/")
+	parts := strings.Split(path, "/")
 
-	if r.Method == "GET" {
-		nodeID := r.URL.Query().Get("node_id")
-		rows, _ := db.Query(`SELECT id, node_id, uri, is_primary, created_at FROM node_uris WHERE node_id = ?`, nodeID)
-		defer rows.Close()
-
-		var uris []NodeURI
-		for rows.Next() {
-			var u NodeURI
-			var createdAt int64
-			rows.Scan(&u.ID, &u.NodeID, &u.URI, &u.IsPrimary, &createdAt)
-			u.CreatedAt = time.Unix(createdAt, 0)
-			uris = append(uris, u)
-		}
-		json.NewEncoder(w).Encode(uris)
+	if len(parts) < 2 {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if r.Method == "POST" {
-		var req NodeURI
-		json.NewDecoder(r.Body).Decode(&req)
-		req.ID = fmt.Sprintf("nodeuri_%d", time.Now().UnixNano())
-		now := time.Now().Unix()
-		_, err := db.Exec(`INSERT INTO node_uris (id, node_id, uri, is_primary, created_at) VALUES (?, ?, ?, ?, ?)`, req.ID, req.NodeID, req.URI, 0, now)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(req)
+	siteName := parts[0]
+	entityPath := strings.Join(parts[1:], "/")
+
+	// Find site
+	var site Site
+	err := db.QueryRow(`SELECT id, name FROM sites WHERE name = ?`, siteName).
+		Scan(&site.ID, &site.Name)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	if r.Method == "DELETE" {
-		id := r.URL.Query().Get("id")
-		_, err := db.Exec(`DELETE FROM node_uris WHERE id = ?`, id)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"deleted": id})
+	// Find node by path within site
+	var node Node
+	var created, modified int64
+	err = db.QueryRow(`SELECT id, type, path, title, content, mime_type, created_at, modified_at FROM nodes WHERE site_id = ? AND path = ?`, site.ID, entityPath).
+		Scan(&node.ID, &node.Type, &node.Path, &node.Title, &node.Content, &node.MimeType, &created, &modified)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+
+	node.CreatedAt = time.Unix(created, 0)
+	node.ModifiedAt = time.Unix(modified, 0)
+
+	// Render based on content type
+	switch node.Type {
+	case NodeTypeImage, NodeTypeVideo, NodeTypeAudio:
+		// Serve media content
+		w.Header().Set("Content-Type", node.MimeType)
+		w.Write([]byte(node.Content))
+	case NodeTypeShaderDemo:
+		// Render shader demo
+		renderShaderDemo(w, node)
+	case NodeTypeCanvas:
+		// Render canvas content
+		renderCanvas(w, node)
+	default:
+		// Render as HTML page
+		renderNodeAsHTML(w, node, site)
+	}
+}
+
+func renderNodeAsHTML(w http.ResponseWriter, node Node, site Site) {
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>%s - %s</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+        .content { line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>%s</h1>
+        <p><em>%s</em></p>
+    </div>
+    <div class="content">
+        %s
+    </div>
+</body>
+</html>`, node.Title, site.Name, node.Title, site.Name, markdownToHTML(node.Content))
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func renderShaderDemo(w http.ResponseWriter, node Node) {
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>%s - Shader Demo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <canvas id="shaderCanvas" style="width: 100%%; height: 100vh; display: block;"></canvas>
+    <script>
+        %s
+    </script>
+</body>
+</html>`, node.Title, node.Content)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func renderCanvas(w http.ResponseWriter, node Node) {
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>%s - Canvas</title>
+</head>
+<body>
+    <div style="text-align: center;">
+        %s
+    </div>
+</body>
+</html>`, node.Title, node.Content)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }
 
 // === API Handlers - Plugin Registry ===
@@ -949,29 +1039,57 @@ func handleBlogPost(w http.ResponseWriter, r *http.Request) {
 
 // === API Handlers - Export ===
 func handleExport(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/zip")
+	siteID := r.URL.Query().Get("site_id")
 	nodeID := r.URL.Query().Get("node_id")
 	format := r.URL.Query().Get("format")
 
-	if format != "zip" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
+	if format == "zip" || format == "static" {
+		// Full site export
+		if siteID != "" {
+			w.Header().Set("Content-Type", "application/zip")
+
+			opts := ExportOptions{
+				SiteID:        siteID,
+				IncludeAssets: true,
+				Theme:         "default",
+				Format:        "zip",
+			}
+
+			zipData, err := ExportSiteAsStatic(opts)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=veil-site-%s.zip", siteID))
+			w.Write(zipData)
+			return
+		}
+
+		// Single node export (legacy)
+		if nodeID != "" {
+			w.Header().Set("Content-Type", "application/zip")
+			var node Node
+			db.QueryRow(`SELECT id, title, content FROM nodes WHERE id = ?`, nodeID).
+				Scan(&node.ID, &node.Title, &node.Content)
+
+			buf := new(bytes.Buffer)
+			zw := zip.NewWriter(buf)
+
+			f, _ := zw.Create(node.Title + ".md")
+			io.WriteString(f, node.Content)
+
+			zw.Close()
+
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=veil-export-%s.zip", node.ID))
+			io.Copy(w, buf)
+			return
+		}
 	}
 
-	var node Node
-	db.QueryRow(`SELECT id, title, content FROM nodes WHERE id = ?`, nodeID).
-		Scan(&node.ID, &node.Title, &node.Content)
-
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
-
-	f, _ := zw.Create(node.Title + ".md")
-	io.WriteString(f, node.Content)
-
-	zw.Close()
-
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=veil-export-%s.zip", node.ID))
-	io.Copy(w, buf)
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{"error": "Missing site_id or node_id parameter"})
 }
 
 func handleRSSFeed(w http.ResponseWriter, r *http.Request) {
@@ -1183,7 +1301,9 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 		} else {
 			// GET /api/sites/site_123/nodes
 			rows, err := db.Query(`
-				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), created_at, modified_at
+				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), 
+				       COALESCE(slug, ''), COALESCE(canonical_uri, ''), COALESCE(body, ''), COALESCE(metadata, ''), 
+				       COALESCE(status, 'draft'), created_at, modified_at
 				FROM nodes WHERE site_id = ? ORDER BY created_at DESC
 			`, siteID)
 			if err != nil {
@@ -1197,8 +1317,10 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			for rows.Next() {
 				var n Node
 				var createdAt, modifiedAt int64
-				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &n.Slug, &n.CanonicalURI, &n.Body, &n.Metadata, &n.Status, &createdAt, &modifiedAt)
+				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType,
+					&n.Slug, &n.CanonicalURI, &n.Body, &n.Metadata, &n.Status, &createdAt, &modifiedAt)
 				if err != nil {
+					log.Printf("Failed to scan node row: %v", err)
 					continue
 				}
 				n.CreatedAt = time.Unix(createdAt, 0)
@@ -1222,13 +1344,34 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			return
 		}
 
+		// Generate node ID and timestamps
 		node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
 		now := time.Now().Unix()
 
+		// Auto-generate slug if not provided
+		if node.Slug == "" {
+			node.Slug = generateSlug(node.Title)
+		}
+
+		// Auto-generate canonical URI if not provided
+		if node.CanonicalURI == "" {
+			node.CanonicalURI = fmt.Sprintf("veil://%s/%s/%s", siteID, node.Type, node.Slug)
+		}
+
+		// Set default status if not provided
+		if node.Status == "" {
+			node.Status = "draft"
+		}
+
+		// Set default visibility if not provided
+		if node.Visibility == "" {
+			node.Visibility = "public"
+		}
+
 		_, err = db.Exec(`
-			INSERT INTO nodes (id, type, path, title, content, mime_type, slug, canonical_uri, body, metadata, status, created_at, modified_at, site_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, node.Slug, node.CanonicalURI, node.Body, node.Metadata, node.Status, now, now, siteID)
+			INSERT INTO nodes (id, type, path, title, content, mime_type, slug, canonical_uri, body, metadata, status, visibility, created_at, modified_at, site_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, node.Slug, node.CanonicalURI, node.Body, node.Metadata, node.Status, node.Visibility, now, now, siteID)
 
 		if err != nil {
 			// Convert DB-level unique constraint errors into a 409 Conflict so clients can handle them
@@ -1385,4 +1528,41 @@ func applyMigrations(database *sql.DB) error {
 	}
 
 	return nil
+}
+
+// === Utility Functions ===
+
+// generateSlug creates a URL-friendly slug from a title
+func generateSlug(title string) string {
+	// Convert to lowercase
+	slug := strings.ToLower(title)
+
+	// Replace spaces and special chars with hyphens
+	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
+
+	// Remove leading/trailing hyphens
+	slug = strings.Trim(slug, "-")
+
+	// Limit length
+	if len(slug) > 100 {
+		slug = slug[:100]
+	}
+
+	return slug
+}
+
+// generateUniqueSlug ensures a slug is unique by appending a number if needed
+func generateUniqueSlug(db *sql.DB, baseSlug, siteID string) string {
+	slug := baseSlug
+	counter := 1
+
+	for {
+		var count int
+		err := db.QueryRow(`SELECT COUNT(1) FROM nodes WHERE slug = ? AND site_id = ?`, slug, siteID).Scan(&count)
+		if err != nil || count == 0 {
+			return slug
+		}
+		slug = fmt.Sprintf("%s-%d", baseSlug, counter)
+		counter++
+	}
 }

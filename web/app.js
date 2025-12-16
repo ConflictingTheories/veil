@@ -9,6 +9,22 @@ let allSites = [];
 let autoSaveTimer = null;
 let autoSaveEnabled = true;
 
+// Node types for Veil
+const NODE_TYPES = {
+    note: 'note',
+    page: 'page',
+    post: 'post',
+    canvas: 'canvas',
+    'shader-demo': 'shader-demo',
+    'code-snippet': 'code-snippet',
+    image: 'image',
+    video: 'video',
+    audio: 'audio',
+    document: 'document',
+    todo: 'todo',
+    reminder: 'reminder'
+};
+
 // ====== INITIALIZATION ======
 document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
@@ -25,10 +41,12 @@ function setupEventListeners() {
     document.getElementById('newNoteBtn')?.addEventListener('click', createNewNote);
     document.getElementById('settingsBtn')?.addEventListener('click', () => openModal('settingsModal'));
     document.getElementById('pluginsBtn')?.addEventListener('click', async () => { openModal('pluginsModal'); await loadPlugins(); });
+    document.getElementById('exportBtn')?.addEventListener('click', () => openModal('exportModal'));
     document.getElementById('openSiteEditor')?.addEventListener('click', () => { openModal('siteEditorModal'); populateSiteEditor(); });
     document.getElementById('saveSiteBtn')?.addEventListener('click', saveSiteEdits);
     document.getElementById('addUriBtn')?.addEventListener('click', addUriPrompt);
     document.getElementById('globalSearch')?.addEventListener('input', (e) => filterNodes(e.target.value));
+    document.getElementById('exportSiteBtn')?.addEventListener('click', exportCurrentSite);
     
     // Editor
     document.getElementById('editor')?.addEventListener('input', debounce(() => {
@@ -58,6 +76,7 @@ function setupEventListeners() {
     document.getElementById('mediaBtn')?.addEventListener('click', () => openModal('mediaModal'));
     document.getElementById('versionsBtn')?.addEventListener('click', showVersions);
     document.getElementById('publishBtn')?.addEventListener('click', () => openModal('publishModal'));
+    document.getElementById('svgBtn')?.addEventListener('click', () => createSVGCanvas());
     
     // Modals
     document.querySelectorAll('[data-modal-close]').forEach(btn => {
@@ -742,4 +761,95 @@ function debounce(fn, delay) {
         clearTimeout(timeout);
         timeout = setTimeout(() => fn(...args), delay);
     };
+}
+
+// ====== SVG CANVAS FUNCTIONS ======
+
+async function createSVGCanvas() {
+    const width = 800;
+    const height = 600;
+    const name = prompt('Enter SVG canvas name:', 'New Drawing');
+
+    if (!name) return;
+
+    try {
+        const response = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'svg',
+                action: 'create',
+                payload: { width, height, name }
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.svg) {
+            // Create a new node with the SVG content
+            const nodeData = {
+                type: 'canvas',
+                title: name,
+                content: result.svg,
+                path: `drawings/${name.toLowerCase().replace(/\s+/g, '-')}`,
+                mime_type: 'image/svg+xml'
+            };
+
+            const createResponse = await fetch(`/api/sites/${currentSite.id}/nodes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(nodeData)
+            });
+
+            if (createResponse.ok) {
+                showToast('SVG canvas created successfully!', 'success');
+                await loadNodes(); // Refresh the node list
+            } else {
+                showToast('Failed to save SVG canvas', 'error');
+            }
+        }
+    } catch (error) {
+        console.error('SVG creation failed:', error);
+        showToast('Failed to create SVG canvas', 'error');
+    }
+}
+
+// ====== UTILITY FUNCTIONS ======
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// ====== EXPORT FUNCTIONALITY ======
+
+async function exportCurrentSite() {
+    if (!currentSite) {
+        alert('Please select a site first');
+        return;
+    }
+    
+    try {
+        showStatusBadge('Exporting...', 'yellow');
+        const url = `/api/export?site_id=${encodeURIComponent(currentSite.id)}&format=zip`;
+        
+        // Create a temporary link and trigger download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `veil-site-${currentSite.id}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        showStatusBadge('Exported!', 'green');
+        closeModal('exportModal');
+        showToast('Site exported successfully!', 'success');
+    } catch (e) {
+        console.error('Export failed:', e);
+        showStatusBadge('Export failed', 'red');
+        alert('Failed to export site');
+    }
 }

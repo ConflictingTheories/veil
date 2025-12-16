@@ -1,6 +1,6 @@
 -- Extend nodes with canonical URI, slug, JSON body & metadata
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS slug TEXT;
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS canonical_uri TEXT UNIQUE;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS canonical_uri TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS body TEXT; -- JSON structured body
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS metadata TEXT; -- JSON metadata
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'draft';

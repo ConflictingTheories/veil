@@ -1,4 +1,285 @@
-# Veil v1.0.0 - Universal Content Platform
+# Veil - Your Personal OS
+
+**A self-contained, universal content management system for creative minds.**
+
+Veil is your digital brain, portfolio manager, blog publisher, and creative toolkit—all in one. It combines the power of a knowledge graph with the flexibility of a static site generator, running entirely from a single binary with SQLite storage.
+
+## 🌟 Philosophy
+
+Veil works in two modes:
+1. **Atomic Server** - Full-featured dynamic CMS with database backend
+2. **Static Export** - Generate self-contained static websites that work anywhere
+
+Everything in Veil has a **URI** (`veil://site/type/slug`), making your content universally addressable and linkable. Think of it as your personal web—a knowledge graph that can be accessed locally, served dynamically, or exported as static files.
+
+## ✨ Features
+
+### Core Capabilities
+
+- **Multi-Site Management** - Create unlimited sites (portfolios, blogs, projects)
+- **Rich Content Types** - Notes, pages, posts, canvases, shader demos, code snippets, media
+- **Version Control** - Built-in versioning with publish/rollback capabilities
+- **Universal URI System** - Every entity is addressable via `veil://` protocol
+- **Static Site Export** - Generate complete, self-contained websites as ZIP files
+- **Plugin Architecture** - Extensible system for Git, IPFS, media processing, and more
+
+### Content Management
+
+- **Markdown Editor** - Clean, distraction-free writing experience with live preview
+- **Auto-save** - Never lose your work
+- **Tags & Organization** - Categorize and find content easily
+- **Search** - Fast full-text search across all content
+- **Backlinks & Forward Links** - See how your notes connect
+- **Media Library** - Store and manage images, videos, audio
+
+### Publishing & Export
+
+- **Static Site Generation** - One-click export to deployable website
+- **RSS Feeds** - Automatic RSS feed generation
+- **Multiple Channels** - Publish to Git, IPFS, FTP, SCP
+- **Responsive Design** - Mobile-first, beautiful default theme
+- **PWA Support** - Progressive Web App manifest included
+
+### Advanced Features
+
+- **SVG Canvas** - Create and edit SVG graphics inline
+- **Shader Demos** - WebGL shader playground integration
+- **Code Snippets** - Syntax-highlighted code blocks
+- **Custom URIs** - Create friendly aliases for any content
+- **Permissions** - Control visibility (public/private/draft)
+- **Credentials Manager** - Secure storage for API keys and tokens
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Clone or download the binary
+go build .
+
+# Initialize a new vault
+./veil init
+
+# Start the GUI
+./veil gui
+```
+
+The GUI will open at `http://localhost:8080`
+
+### Basic Usage
+
+1. **Create a Site**
+   - Click "New Site" in the sidebar
+   - Give it a name (e.g., "My Portfolio")
+   - Start adding content
+
+2. **Create Notes**
+   - Click "New Note"
+   - Write in Markdown
+   - Auto-save handles the rest
+
+3. **Export Your Site**
+   - Click the export button (download icon)
+   - Download a complete static website
+   - Upload to any hosting service
+
+## 📚 Content Types
+
+### Notes
+Quick thoughts, drafts, or personal notes. Perfect for your second brain.
+
+### Pages  
+Permanent content like "About" or "Contact" pages.
+
+### Posts
+Blog posts with publish dates and categories.
+
+### Canvas
+SVG drawings and graphics created with the built-in editor.
+
+### Shader Demos
+Interactive WebGL shader demonstrations.
+
+### Code Snippets
+Syntax-highlighted code examples with multiple language support.
+
+### Media
+Images, videos, audio files with automatic optimization.
+
+## 🔌 Plugin System
+
+Veil includes a robust plugin architecture:
+
+### Built-in Plugins
+
+- **Git** - Version control integration
+- **IPFS** - Decentralized content publishing
+- **Namecheap** - Domain management
+- **Media** - Image/video processing
+- **Pixospritz** - Advanced graphics operations
+
+### Creating Plugins
+
+Plugins implement the `Plugin` interface:
+
+```go
+type Plugin interface {
+    Name() string
+    Version() string
+    Initialize(config map[string]interface{}) error
+    Execute(ctx context.Context, action string, payload interface{}) (interface{}, error)
+    Validate() error
+    Shutdown() error
+}
+```
+
+## 🌐 URI System
+
+Every entity in Veil has a canonical URI:
+
+```
+veil://site_id/type/slug
+```
+
+Examples:
+- `veil://portfolio/page/about`
+- `veil://blog/post/my-first-post`
+- `veil://projects/canvas/logo-design`
+
+You can also create custom URI aliases for any content.
+
+## 📤 Export & Publishing
+
+### Static Site Export
+
+Generates a complete website package including:
+- ✓ HTML pages for all published content
+- ✓ Responsive CSS
+- ✓ RSS feed (`feed.xml`)
+- ✓ JSON API (`api.json`)
+- ✓ PWA manifest (`manifest.json`)
+
+### Publishing Channels
+
+- **Static** - Export as ZIP
+- **Git** - Commit and push to repository
+- **IPFS** - Publish to InterPlanetary File System
+- **RSS** - Generate/update RSS feed
+- **FTP/SCP** - Direct server upload (coming soon)
+
+## 🛠️ CLI Commands
+
+```bash
+# Initialize new vault
+veil init [path]
+
+# Start web server
+veil serve [--port N]
+
+# Launch GUI mode
+veil gui
+
+# Create new node
+veil new <path>
+
+# List all nodes
+veil list
+
+# Publish a node
+veil publish <node-id>
+
+# Export content
+veil export <node-id> <type>
+
+# Show version
+veil version
+```
+
+## 🗄️ Database Schema
+
+Veil uses SQLite with the following main tables:
+
+- `nodes` - All content (notes, pages, posts, etc.)
+- `sites` - Site/project definitions
+- `versions` - Version history for nodes
+- `node_uris` - Custom URI aliases
+- `tags` - Content tags
+- `media` - Media file metadata
+- `plugins_registry` - Plugin configurations
+- `publish_jobs` - Publishing queue
+
+## 🎨 Customization
+
+### Themes
+
+Export comes with a beautiful default theme. Custom themes coming soon.
+
+### Plugins
+
+Extend Veil with custom plugins for:
+- Custom publishing channels
+- Content transformations
+- External integrations
+- Custom editors
+
+## 🔐 Security & Privacy
+
+- **Local-first** - All data stored in local SQLite database
+- **No tracking** - No analytics, no telemetry
+- **Encrypted credentials** - API keys stored securely
+- **Permission system** - Control content visibility
+- **Self-hosted** - Run anywhere, own your data
+
+## 📖 Use Cases
+
+### Personal Knowledge Base
+Build your second brain with interconnected notes and backlinks.
+
+### Portfolio Website
+Showcase your work with a beautiful, exportable portfolio.
+
+### Blog
+Write and publish blog posts with RSS feeds.
+
+### Project Documentation
+Document your projects with version control.
+
+### Creative Toolkit
+Use SVG canvas, shader demos, and code snippets.
+
+### Digital Garden
+Grow a public digital garden of your thoughts.
+
+## 🗺️ Roadmap
+
+- [ ] Real-time collaboration
+- [ ] End-to-end encryption
+- [ ] Mobile apps (iOS/Android)
+- [ ] Plugin marketplace
+- [ ] Theme marketplace
+- [ ] Git-like sync protocol
+- [ ] Web hosting service
+- [ ] Desktop app (Electron/Tauri)
+
+## 🤝 Contributing
+
+Veil is open source. Contributions welcome!
+
+## 📄 License
+
+MIT License - See LICENSE file
+
+## 🙏 Acknowledgments
+
+Built with:
+- Go + SQLite for the backend
+- Vanilla JS for the frontend
+- Tailwind CSS for styling
+- Markdown for content
+
+---
+
+**Veil** - Build your digital universe, export it anywhere.
 
 > Self-hosted, plugin-driven content management system with multi-channel publishing, versioning, and advanced integrations.
 

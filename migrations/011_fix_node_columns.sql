@@ -1,0 +1,8 @@
+-- Fix node table columns that failed to add in previous migration
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS slug TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS canonical_uri TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS body TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS metadata TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'draft';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS site_id TEXT REFERENCES sites(id);
