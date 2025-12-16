@@ -250,16 +250,69 @@
 <div id="mediaModal" class="modal-overlay hidden">
     <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4">
         <div class="p-6 border-b border-slate-200 flex justify-between items-center">
-            <h2 class="text-lg font-bold text-slate-900">Media</h2>
+            <h2 class="text-lg font-bold text-slate-900">Media Library</h2>
             <button data-modal-close class="text-slate-500 hover:text-slate-700 text-xl">
                 <i class="fas fa-times"></i>
             </button>
         </div>
         <div class="p-6">
-            <div class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer">
-                <i class="fas fa-cloud-upload-alt text-3xl text-slate-400 mb-2"></i>
-                <p class="text-slate-700 font-medium text-sm">Upload Media</p>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Upload Media</label>
+                <div class="flex gap-2">
+                    <input type="file" id="mediaFileInput" accept="image/*,video/*,audio/*" class="flex-1 text-sm">
+                    <button onclick="uploadMedia()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+                        <i class="fas fa-upload mr-1"></i> Upload
+                    </button>
+                </div>
             </div>
+            <div id="mediaLibrary" class="grid grid-cols-3 gap-4 mt-4">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Link Modal -->
+<div id="linkModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4">
+        <div class="p-6 border-b border-slate-200 flex justify-between items-center">
+            <h2 class="text-lg font-bold text-slate-900">Insert Link</h2>
+            <button data-modal-close class="text-slate-500 hover:text-slate-700 text-xl">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Link Type</label>
+                <select id="linkType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                    <option value="internal">Internal Note</option>
+                    <option value="external">External URL</option>
+                    <option value="veil">Veil URI</option>
+                </select>
+            </div>
+            <div id="internalLinkSection">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Search Notes</label>
+                <input type="text" id="linkSearchInput" placeholder="Search..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mb-2">
+                <div id="linkSearchResults" class="max-h-48 overflow-y-auto space-y-1">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+            <div id="externalLinkSection" class="hidden">
+                <label class="block text-sm font-medium text-slate-700 mb-2">URL</label>
+                <input type="text" id="externalUrlInput" placeholder="https://..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+            <div id="veilUriSection" class="hidden">
+                <label class="block text-sm font-medium text-slate-700 mb-2">Veil URI</label>
+                <input type="text" id="veilUriInput" placeholder="veil://site/type/slug" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Link Text</label>
+                <input type="text" id="linkTextInput" placeholder="Link text..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            </div>
+        </div>
+        <div class="p-6 border-t border-slate-200 flex gap-2">
+            <button class="flex-1 py-2 px-4 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition text-sm" data-modal-close>Cancel</button>
+            <button onclick="insertLink()" class="flex-1 py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium text-sm">Insert</button>
         </div>
     </div>
 </div>

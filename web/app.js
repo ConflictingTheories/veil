@@ -858,6 +858,239 @@ async function exportCurrentSite() {
 
 async function saveGitConfig() {
     const repo = document.getElementById('gitRepo')?.value;
+    const branch = document.getElementById('gitBranch')?.value;
+    const token = document.getElementById('gitToken')?.value;
+    
+    if (!repo || !branch) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/plugins/git/configure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                enabled: true,
+                config: { repo, branch, token }
+            })
+        });
+        
+        if (response.ok) {
+            alert('Git configuration saved');
+        } else {
+            alert('Failed to save configuration');
+        }
+    } catch (e) {
+        console.error('Git config error:', e);
+        alert('Configuration error');
+    }
+}
+
+// ====== MEDIA FUNCTIONALITY ======
+
+async function uploadMedia() {
+    const fileInput = document.getElementById('mediaFileInput');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('Please select a file');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const response = await fetch('/api/media/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showToast('Media uploaded successfully', 'success');
+            loadMediaLibrary();
+            fileInput.value = '';
+        } else {
+            alert('Upload failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Upload error: ' + err.message);
+    }
+}
+
+async function loadMediaLibrary() {
+    try {
+        const response = await fetch('/api/media');
+        const media = await response.json();
+        const library = document.getElementById('mediaLibrary');
+        
+        if (!media || media.length === 0) {
+            library.innerHTML = '<p class="col-span-3 text-center text-slate-500 text-sm py-8">No media uploaded yet</p>';
+            return;
+        }
+        
+        library.innerHTML = media.map(m => {
+            const isImage = m.mime_type && m.mime_type.startsWith('image/');
+            return `
+                <div class="border border-slate-200 rounded-lg p-2 hover:border-indigo-500 cursor-pointer transition" onclick="insertMediaIntoEditor('${m.url}', '${m.filename}')">
+                    ${isImage ? `<img src="${m.url}" alt="${m.filename}" class="w-full h-24 object-cover rounded mb-1">` : `<div class="w-full h-24 bg-slate-100 rounded mb-1 flex items-center justify-center"><i class="fas fa-file text-3xl text-slate-400"></i></div>`}
+                    <p class="text-xs text-slate-600 truncate" title="${m.filename}">${m.filename}</p>
+                    <p class="text-xs text-slate-400">${formatFileSize(m.size)}</p>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load media:', err);
+    }
+}
+
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+function insertMediaIntoEditor(url, filename) {
+    const editor = document.getElementById('noteContent');
+    if (!editor) return;
+    
+    const isImage = url.match(/\.(jpg|jpeg|png|gif|svg|webp)$/i);
+    const markdown = isImage ? `![${filename}](${url})` : `[${filename}](${url})`;
+    
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const text = editor.value;
+    editor.value = text.substring(0, start) + markdown + text.substring(end);
+    editor.selectionStart = editor.selectionEnd = start + markdown.length;
+    editor.focus();
+    closeModal('mediaModal');
+}
+
+// ====== LINK FUNCTIONALITY ======
+
+let selectedLinkNode = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const linkTypeSelect = document.getElementById('linkType');
+    if (linkTypeSelect) {
+        linkTypeSelect.addEventListener('change', (e) => {
+            const type = e.target.value;
+            document.getElementById('internalLinkSection').classList.toggle('hidden', type !== 'internal');
+            document.getElementById('externalLinkSection').classList.toggle('hidden', type !== 'external');
+            document.getElementById('veilUriSection').classList.toggle('hidden', type !== 'veil');
+        });
+    }
+    
+    const linkSearchInput = document.getElementById('linkSearchInput');
+    if (linkSearchInput) {
+        linkSearchInput.addEventListener('input', async (e) => {
+            const query = e.target.value.toLowerCase();
+            if (!query || !currentSite) return;
+            
+            try {
+                const response = await fetch(`/api/sites/${currentSite}/nodes`);
+                const nodes = await response.json();
+                const filtered = nodes.filter(n => 
+                    n.title.toLowerCase().includes(query) || 
+                    (n.content && n.content.toLowerCase().includes(query))
+                );
+                
+                const results = document.getElementById('linkSearchResults');
+                results.innerHTML = filtered.slice(0, 10).map(n => `
+                    <div class="p-2 hover:bg-slate-100 rounded cursor-pointer text-sm" onclick="selectLinkNode('${n.id}', '${n.title.replace(/'/g, "\\'")}')">
+                        <div class="font-medium text-slate-900">${n.title}</div>
+                        <div class="text-xs text-slate-500">${n.type || 'note'}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error('Search failed:', err);
+            }
+        });
+    }
+});
+
+function selectLinkNode(nodeId, title) {
+    selectedLinkNode = { id: nodeId, title: title };
+    document.getElementById('linkTextInput').value = title;
+    document.querySelectorAll('#linkSearchResults > div').forEach(el => {
+        el.classList.remove('bg-indigo-50', 'border-l-4', 'border-indigo-500');
+    });
+    event.target.closest('div').classList.add('bg-indigo-50', 'border-l-4', 'border-indigo-500');
+}
+
+async function insertLink() {
+    const type = document.getElementById('linkType').value;
+    const linkText = document.getElementById('linkTextInput').value;
+    const editor = document.getElementById('noteContent');
+    
+    if (!editor || !linkText) {
+        alert('Please provide link text');
+        return;
+    }
+    
+    let linkUrl = '';
+    
+    if (type === 'internal' && selectedLinkNode) {
+        linkUrl = `veil://note/${selectedLinkNode.id}`;
+        
+        // Create reference in database
+        if (currentNode) {
+            try {
+                await fetch(`/api/sites/${currentSite}/nodes/${currentNode}/references`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        target_node_id: selectedLinkNode.id,
+                        link_text: linkText,
+                        link_type: 'internal'
+                    })
+                });
+            } catch (err) {
+                console.error('Failed to create reference:', err);
+            }
+        }
+    } else if (type === 'external') {
+        linkUrl = document.getElementById('externalUrlInput').value;
+        if (!linkUrl.startsWith('http')) {
+            alert('External URL must start with http:// or https://');
+            return;
+        }
+    } else if (type === 'veil') {
+        linkUrl = document.getElementById('veilUriInput').value;
+        if (!linkUrl.startsWith('veil://')) {
+            alert('Veil URI must start with veil://');
+            return;
+        }
+    }
+    
+    const markdown = `[${linkText}](${linkUrl})`;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const text = editor.value;
+    editor.value = text.substring(0, start) + markdown + text.substring(end);
+    editor.selectionStart = editor.selectionEnd = start + markdown.length;
+    editor.focus();
+    
+    closeModal('linkModal');
+    selectedLinkNode = null;
+    document.getElementById('linkSearchInput').value = '';
+    document.getElementById('linkTextInput').value = '';
+    document.getElementById('externalUrlInput').value = '';
+    document.getElementById('veilUriInput').value = '';
+    document.getElementById('linkType').value = 'internal';
+    
+    // Reload references if viewing current node
+    if (currentNode) {
+        loadReferences();
+    }
+}
+
+// ====== ORIGINAL GIT CONFIG FUNCTION ======
+
+async function saveGitConfigOriginal() {
+    const repo = document.getElementById('gitRepo')?.value;
     if (!repo) {
         alert('Please enter a repository URL');
         return;
