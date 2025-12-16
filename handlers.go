@@ -534,9 +534,9 @@ func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	fpath := filepath.Join("media", filename)
 	os.WriteFile(fpath, content, 0644)
 
-	_, err = db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at)
+	_, err = db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, file_size, uploaded_by, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		mediaID, handler.Filename, fpath, hashStr, handler.Header.Get("Content-Type"), len(content), "", now)
+		mediaID, handler.Filename, "/media/"+filename, hashStr, handler.Header.Get("Content-Type"), len(content), "", now)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
