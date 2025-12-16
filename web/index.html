@@ -1,53 +1,339 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Veil</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veil - Universal Content Management</title>
     <link rel="stylesheet" href="styles.css">
 </head>
-
 <body>
-    <div class="titlebar">
-        <div class="titlebar-left">
-            <div class="titlebar-logo">VEIL</div>
-            <div class="titlebar-path">~/veil.db</div>
-        </div>
-    </div>
-    <div class="main-container">
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-title">WORKSPACE</div>
-                <div class="sidebar-actions">
-                    <button class="icon-btn" id="newFileBtn">+</button>
-                </div>
+    <div class="container">
+        <!-- Titlebar -->
+        <header class="titlebar">
+            <div class="logo">Veil</div>
+            <div class="breadcrumb" id="breadcrumb"></div>
+            <div class="titlebar-actions">
+                <button id="settingsBtn" class="btn-icon" title="Settings">⚙️</button>
             </div>
-            <div class="tree-view" id="treeView"></div>
-        </div>
-        <div class="editor-container">
-            <div class="tabs" id="tabs"></div>
-            <div class="editor">
-                <div class="editor-left">
-                    <div class="editor-toolbar">
-                        <button class="toolbar-btn" id="togglePreview">Preview</button>
+        </header>
+
+        <div class="main-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-tabs">
+                    <button class="tab-btn active" data-tab="files">Files</button>
+                    <button class="tab-btn" data-tab="tags">Tags</button>
+                    <button class="tab-btn" data-tab="graph">Graph</button>
+                </div>
+
+                <!-- Files Tab -->
+                <div class="tab-content active" id="files-tab">
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="Search...">
                     </div>
-                    <textarea class="editor-text" id="editor" placeholder="Start writing..."></textarea>
+                    <div class="file-tree" id="fileTree"></div>
+                    <button id="newNodeBtn" class="btn-primary" style="width: 100%; margin-top: 10px;">+ New Note</button>
                 </div>
-                <div class="preview-pane" id="preview"></div>
+
+                <!-- Tags Tab -->
+                <div class="tab-content" id="tags-tab">
+                    <div class="tags-list" id="tagsList"></div>
+                </div>
+
+                <!-- Graph Tab -->
+                <div class="tab-content" id="graph-tab">
+                    <div id="graphContainer" style="width: 100%; height: 400px; border: 1px solid #ccc; border-radius: 4px;"></div>
+                </div>
+            </aside>
+
+            <!-- Main Editor -->
+            <main class="editor-area">
+                <div class="editor-toolbar">
+                    <button id="boldBtn" class="toolbar-btn" title="Bold">B</button>
+                    <button id="italicBtn" class="toolbar-btn" title="Italic">I</button>
+                    <button id="codeBtn" class="toolbar-btn" title="Code">`</button>
+                    <button id="linkBtn" class="toolbar-btn" title="Link">🔗</button>
+                    <div class="toolbar-separator"></div>
+                    <button id="autoSaveToggle" class="toolbar-btn active" title="Auto-save">��</button>
+                    <button id="publishBtn" class="toolbar-btn" title="Publish">📤</button>
+                    <button id="exportBtn" class="toolbar-btn" title="Export">📦</button>
+                    <button id="versionBtn" class="toolbar-btn" title="Versions">📜</button>
+                    <button id="tagsBtn" class="toolbar-btn" title="Tags">🏷️</button>
+                    <button id="citationBtn" class="toolbar-btn" title="Citations">📚</button>
+                    <button id="mediaBtn" class="toolbar-btn" title="Media">🖼️</button>
+                </div>
+
+                <div class="editor-content">
+                    <textarea id="editor" placeholder="Start writing..."></textarea>
+                    <div id="preview" class="preview"></div>
+                </div>
+
+                <!-- References Panel -->
+                <div class="references-panel">
+                    <div class="panel-header">
+                        <h3>References</h3>
+                        <span class="panel-toggle">−</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="references-section">
+                            <h4>Linked From</h4>
+                            <ul id="linkedFromList" class="references-list"></ul>
+                        </div>
+                        <div class="references-section">
+                            <h4>Links To</h4>
+                            <ul id="linksToList" class="references-list"></ul>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <span id="statusText">Ready</span>
+            <span class="word-count">Words: <span id="wordCount">0</span></span>
+        </footer>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- Publish Modal -->
+    <div id="publishModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Publish</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <label>
+                    <input type="checkbox" id="publishPublic"> Make Public
+                </label>
+                <label>
+                    <input type="checkbox" id="publishWebsite"> Publish to Website
+                </label>
+                <label>
+                    <input type="checkbox" id="publishRSS"> Include in RSS Feed
+                </label>
+                <div class="form-group">
+                    <label>Publishing Channel:</label>
+                    <select id="publishChannel">
+                        <option value="">Select channel...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Publish Date:</label>
+                    <input type="datetime-local" id="publishDate">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Cancel</button>
+                <button id="confirmPublish" class="btn-primary">Publish</button>
             </div>
         </div>
     </div>
-    <div class="statusbar">
-        <div class="statusbar-left">
-            <div class="status-item">
-                <span class="status-dot"></span><span id="syncText">Ready</span>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Export</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="export-options">
+                    <label>
+                        <input type="radio" name="exportFormat" value="zip"> ZIP Archive
+                    </label>
+                    <label>
+                        <input type="radio" name="exportFormat" value="html"> HTML
+                    </label>
+                    <label>
+                        <input type="radio" name="exportFormat" value="json"> JSON
+                    </label>
+                    <label>
+                        <input type="radio" name="exportFormat" value="pdf"> PDF
+                    </label>
+                </div>
+                <label style="margin-top: 15px;">
+                    <input type="checkbox" id="exportIncludeMedia"> Include Media
+                </label>
+                <label>
+                    <input type="checkbox" id="exportIncludeBacklinks"> Include Backlinks
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Cancel</button>
+                <button id="confirmExport" class="btn-primary">Export</button>
             </div>
         </div>
-        <div class="statusbar-right">
-            <div class="status-item" id="wordCount">0 words</div>
+    </div>
+
+    <!-- Version History Modal -->
+    <div id="versionsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Version History</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="versionsList" class="versions-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Close</button>
+            </div>
         </div>
     </div>
+
+    <!-- Tags Modal -->
+    <div id="tagsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Tags</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Add Tag:</label>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="newTagInput" placeholder="Tag name...">
+                        <input type="color" id="tagColorInput" value="#3498db">
+                        <button id="addTagBtn" class="btn-primary">Add</button>
+                    </div>
+                </div>
+                <div id="nodeTagsList" class="tags-list" style="margin-top: 15px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Citation Modal -->
+    <div id="citationModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Citations</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Citation Key:</label>
+                    <input type="text" id="citationKey">
+                </div>
+                <div class="form-group">
+                    <label>Authors:</label>
+                    <input type="text" id="citationAuthors">
+                </div>
+                <div class="form-group">
+                    <label>Title:</label>
+                    <input type="text" id="citationTitle">
+                </div>
+                <div class="form-group">
+                    <label>Year:</label>
+                    <input type="number" id="citationYear">
+                </div>
+                <div class="form-group">
+                    <label>DOI:</label>
+                    <input type="text" id="citationDOI">
+                </div>
+                <div class="form-group">
+                    <label>URL:</label>
+                    <input type="url" id="citationURL">
+                </div>
+                <div class="form-group">
+                    <label>Format:</label>
+                    <select id="citationFormat">
+                        <option value="APA">APA</option>
+                        <option value="MLA">MLA</option>
+                        <option value="Chicago">Chicago</option>
+                        <option value="Harvard">Harvard</option>
+                        <option value="BibTeX">BibTeX</option>
+                    </select>
+                </div>
+                <div id="citationsList" class="citations-list" style="margin-top: 15px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="addCitationBtn" class="btn-primary">Add Citation</button>
+                <button class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Media Library Modal -->
+    <div id="mediaModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Media Library</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Upload File:</label>
+                    <input type="file" id="mediaUpload" multiple>
+                    <button id="uploadMediaBtn" class="btn-primary">Upload</button>
+                </div>
+                <div id="mediaGrid" class="media-grid" style="margin-top: 15px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Link Reference Modal -->
+    <div id="linkModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Link to Note</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="text" id="linkSearch" placeholder="Search notes to link...">
+                <div id="linkSearchResults" class="link-results" style="margin-top: 10px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="darkModeToggle"> Dark Mode
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="autoSaveCheckbox" checked> Auto-save
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Auto-save Interval (seconds):</label>
+                    <input type="number" id="autoSaveInterval" value="5" min="1">
+                </div>
+                <div class="form-group">
+                    <label>Default Visibility:</label>
+                    <select id="defaultVisibility">
+                        <option value="private">Private</option>
+                        <option value="public">Public</option>
+                        <option value="shared">Shared</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
-
 </html>

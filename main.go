@@ -216,10 +216,10 @@ func serve() {
 	}
 	defer db.Close()
 
-	setupRoutes()
+	mux := setupRoutes()
 	addr := ":" + port
 	fmt.Printf("✓ Veil running at http://localhost:%s\n", port)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
 func gui() {
@@ -231,9 +231,9 @@ func gui() {
 	}
 	defer db.Close()
 
-	setupRoutes()
+	mux := setupRoutes()
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Fatal(http.ListenAndServe(":8080", mux))
 	}()
 
 	time.Sleep(500 * time.Millisecond)
@@ -253,7 +253,7 @@ func gui() {
 	select {}
 }
 
-func setupRoutes() {
+func setupRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Static files
@@ -308,7 +308,7 @@ func setupRoutes() {
 	// Citation
 	mux.HandleFunc("/api/citations", handleCitations)
 
-	http.ListenAndServe("", mux)
+	return mux
 }
 
 // === CLI Commands ===
@@ -795,236 +795,4 @@ func markdownToHTML(md string) string {
 	// Line breaks
 	html = strings.ReplaceAll(html, "\n", "<br>\n")
 	return html
-}
-
-func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		return
-	}
-
-	command := os.Args[1]
-
-	switch command {
-	case "init":
-		initVault()
-	case "serve":
-		serve()
-	case "gui":
-		gui()
-	case "new":
-		createNode()
-	case "list":
-		listNodes()
-	case "version":
-		fmt.Println("veil v0.1.0")
-	default:
-		printUsage()
-	}
-}
-
-func printUsage() {
-	fmt.Println(`veil - Universal content management system
-
-Usage:
-  veil init [path]       Initialize new vault (default: ./veil.db)
-  veil serve [--port N]  Start web server (default: 8080)
-  veil gui               Launch GUI mode
-  veil new <path>        Create new file/note
-  veil list              List all nodes
-  veil version           Show version
-
-Examples:
-  veil init ~/my-vault
-  veil serve --port 3000
-  veil new notes/ideas.md`)
-}
-
-func initVault() {
-	path := "./veil.db"
-	if len(os.Args) > 2 {
-		path = os.Args[2]
-	}
-
-	if len(path) > 2 && path[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Fatal("Failed to create directory:", err)
-	}
-
-	database, err := sql.Open("sqlite", path)
-	if err != nil {
-		log.Fatal("Failed to create database:", err)
-	}
-	defer database.Close()
-
-	migrationFiles, _ := fs.ReadDir(migrations, "migrations")
-	for _, file := range migrationFiles {
-		content, _ := migrations.ReadFile("migrations/" + file.Name())
-		if _, err := database.Exec(string(content)); err != nil {
-			log.Fatal("Migration failed:", err)
-		}
-	}
-
-	sampleID := fmt.Sprintf("node_%d", time.Now().UnixNano())
-	now := time.Now().Unix()
-	database.Exec(`
-		INSERT INTO nodes (id, type, path, title, content, mime_type, created_at, modified_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, sampleID, "note", "welcome.md", "Welcome to Veil",
-		"# Welcome to Veil\n\nStart writing!\n\n## Features\n- Single binary\n- SQLite storage\n- Clean UI",
-		"text/markdown", now, now)
-
-	fmt.Printf("✓ Initialized vault at %s\n", path)
-	fmt.Println("\nNext steps:")
-	fmt.Println("  veil serve")
-	fmt.Println("  veil gui")
-}
-
-func serve() {
-	port := "8080"
-	dbPath = "./veil.db"
-
-	for i, arg := range os.Args {
-		if arg == "--port" && i+1 < len(os.Args) {
-			port = os.Args[i+1]
-		}
-	}
-
-	var err error
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		log.Fatal("Failed to open database:", err)
-	}
-	defer db.Close()
-
-	mux := http.NewServeMux()
-	webFS, _ := fs.Sub(webUI, "web")
-	mux.Handle("/", http.FileServer(http.FS(webFS)))
-	mux.HandleFunc("/api/nodes", handleNodes)
-	mux.HandleFunc("/api/node/", handleNode)
-
-	addr := "localhost:" + port
-	fmt.Printf("✓ Veil running at http://%s\n", addr)
-	http.ListenAndServe(addr, mux)
-}
-
-func gui() {
-	dbPath = "./veil.db"
-	db, _ = sql.Open("sqlite", dbPath)
-	defer db.Close()
-
-	go func() {
-		mux := http.NewServeMux()
-		webFS, _ := fs.Sub(webUI, "web")
-		mux.Handle("/", http.FileServer(http.FS(webFS)))
-		mux.HandleFunc("/api/nodes", handleNodes)
-		mux.HandleFunc("/api/node/", handleNode)
-		http.ListenAndServe("localhost:8080", mux)
-	}()
-
-	time.Sleep(500 * time.Millisecond)
-	url := "http://localhost:8080"
-	fmt.Printf("✓ Opening Veil at %s\n", url)
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	cmd.Start()
-	select {}
-}
-
-func createNode() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: veil new <path>")
-		return
-	}
-	path := os.Args[2]
-	dbPath = "./veil.db"
-	db, _ = sql.Open("sqlite", dbPath)
-	defer db.Close()
-
-	id := fmt.Sprintf("node_%d", time.Now().UnixNano())
-	db.Exec(`INSERT INTO nodes (id, type, path, title, content, mime_type, created_at, modified_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, "note", path, filepath.Base(path), "", "text/markdown", time.Now().Unix(), time.Now().Unix())
-	fmt.Printf("✓ Created %s\n", path)
-}
-
-func listNodes() {
-	dbPath = "./veil.db"
-	db, _ = sql.Open("sqlite", dbPath)
-	defer db.Close()
-
-	rows, _ := db.Query(`SELECT path, title FROM nodes WHERE deleted_at IS NULL ORDER BY path`)
-	defer rows.Close()
-
-	fmt.Println("Nodes:")
-	for rows.Next() {
-		var path, title string
-		rows.Scan(&path, &title)
-		fmt.Printf("  %s - %s\n", path, title)
-	}
-}
-
-func handleNodes(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		rows, _ := db.Query(`SELECT id, type, COALESCE(parent_id, ''), path, title, content, mime_type, created_at, modified_at 
-			FROM nodes WHERE deleted_at IS NULL ORDER BY path`)
-		defer rows.Close()
-
-		var nodes []Node
-		for rows.Next() {
-			var node Node
-			var created, modified int64
-			rows.Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title,
-				&node.Content, &node.MimeType, &created, &modified)
-			node.CreatedAt = time.Unix(created, 0)
-			node.ModifiedAt = time.Unix(modified, 0)
-			nodes = append(nodes, node)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(nodes)
-	} else if r.Method == "POST" {
-		var node Node
-		json.NewDecoder(r.Body).Decode(&node)
-		node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
-		now := time.Now().Unix()
-		db.Exec(`INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, created_at, modified_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, now, now)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(node)
-	}
-}
-
-func handleNode(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/api/node/"):]
-	if r.Method == "GET" {
-		var node Node
-		var created, modified int64
-		db.QueryRow(`SELECT id, type, COALESCE(parent_id, ''), path, title, content, mime_type, created_at, modified_at 
-			FROM nodes WHERE id = ?`, id).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path,
-			&node.Title, &node.Content, &node.MimeType, &created, &modified)
-		node.CreatedAt = time.Unix(created, 0)
-		node.ModifiedAt = time.Unix(modified, 0)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(node)
-	} else if r.Method == "PUT" {
-		var node Node
-		json.NewDecoder(r.Body).Decode(&node)
-		db.Exec(`UPDATE nodes SET title = ?, content = ?, modified_at = ? WHERE id = ?`,
-			node.Title, node.Content, time.Now().Unix(), id)
-		w.WriteHeader(204)
-	}
 }
