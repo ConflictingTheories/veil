@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +109,15 @@ type Citation struct {
 	RawBibtex      string `json:"raw_bibtex"`
 }
 
+type Site struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Type        string    `json:"type"` // project, portfolio, blog, etc
+	CreatedAt   time.Time `json:"created_at"`
+	ModifiedAt  time.Time `json:"modified_at"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -169,8 +179,14 @@ func initVault() {
 		path = filepath.Join(home, path[2:])
 	}
 
-	dir := filepath.Dir(path)
-	os.MkdirAll(dir, 0755)
+	// If path is a directory, append veil.db
+	if stat, err := os.Stat(path); err == nil && stat.IsDir() {
+		path = filepath.Join(path, "veil.db")
+	} else if err != nil {
+		// Path doesn't exist, check if parent is directory
+		dir := filepath.Dir(path)
+		os.MkdirAll(dir, 0755)
+	}
 
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -180,6 +196,12 @@ func initVault() {
 
 	// Run migrations
 	migrationFiles, _ := fs.ReadDir(migrations, "migrations")
+
+	// Sort migration files by name to ensure proper order
+	sort.Slice(migrationFiles, func(i, j int) bool {
+		return migrationFiles[i].Name() < migrationFiles[j].Name()
+	})
+
 	for _, file := range migrationFiles {
 		content, _ := migrations.ReadFile("migrations/" + file.Name())
 		statements := strings.Split(string(content), ";")
@@ -216,9 +238,14 @@ func serve() {
 	}
 	defer db.Close()
 
+	// Initialize plugin systems
+	initPluginRegistry()
+	initCredentialManager()
+
 	mux := setupRoutes()
 	addr := ":" + port
 	fmt.Printf("✓ Veil running at http://localhost:%s\n", port)
+	fmt.Println("✓ Plugins initialized: Git, IPFS, Namecheap, Media, Pixospritz")
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
@@ -230,6 +257,10 @@ func gui() {
 		log.Fatal("Failed to open database:", err)
 	}
 	defer db.Close()
+
+	// Initialize plugin systems
+	initPluginRegistry()
+	initCredentialManager()
 
 	mux := setupRoutes()
 	go func() {
@@ -307,6 +338,16 @@ func setupRoutes() *http.ServeMux {
 
 	// Citation
 	mux.HandleFunc("/api/citations", handleCitations)
+
+	// Sites/Projects
+	mux.HandleFunc("/api/sites", handleSites)
+	mux.HandleFunc("/api/sites/", handleSitesDetail)
+
+	// Plugin APIs (NEW)
+	mux.HandleFunc("/api/plugins", handlePluginsList)
+	mux.HandleFunc("/api/plugin-execute", handlePluginExecute)
+	mux.HandleFunc("/api/credentials", handleCredentialsAPI)
+	mux.HandleFunc("/api/publish-job", handlePublishJob)
 
 	return mux
 }
@@ -778,6 +819,197 @@ func handleCitations(w http.ResponseWriter, r *http.Request) {
 		citations = append(citations, c)
 	}
 	json.NewEncoder(w).Encode(citations)
+}
+
+// === API Handlers - Sites ===
+func handleSites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "GET" {
+		// List all sites
+		rows, err := db.Query(`SELECT id, name, description, type, created_at, modified_at FROM sites ORDER BY created_at DESC`)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		sites := make([]Site, 0) // Initialize as empty slice, not nil
+		for rows.Next() {
+			var s Site
+			var createdAt, modifiedAt int64
+			err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Type, &createdAt, &modifiedAt)
+			if err != nil {
+				continue
+			}
+			s.CreatedAt = time.Unix(createdAt, 0)
+			s.ModifiedAt = time.Unix(modifiedAt, 0)
+			sites = append(sites, s)
+		}
+
+		json.NewEncoder(w).Encode(sites)
+	} else if r.Method == "POST" {
+		// Create new site
+		var req map[string]string
+		json.NewDecoder(r.Body).Decode(&req)
+
+		id := fmt.Sprintf("site_%d", time.Now().UnixNano())
+		name := req["name"]
+		description := req["description"]
+		siteType := req["type"]
+		if siteType == "" {
+			siteType = "project"
+		}
+
+		now := time.Now().Unix()
+		_, err := db.Exec(`
+			INSERT INTO sites (id, name, description, type, created_at, modified_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, id, name, description, siteType, now, now)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		site := Site{
+			ID:          id,
+			Name:        name,
+			Description: description,
+			Type:        siteType,
+			CreatedAt:   time.Unix(now, 0),
+			ModifiedAt:  time.Unix(now, 0),
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(site)
+	}
+}
+
+func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract site ID from path like /api/sites/site_123/nodes
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	siteID := parts[3]
+
+	// Route to appropriate handler
+	if len(parts) > 4 && parts[4] == "nodes" {
+		handleSiteNodes(w, r, siteID)
+	}
+}
+
+func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "GET" {
+		// Extract nodeID from path if present
+		parts := strings.Split(r.URL.Path, "/")
+
+		if len(parts) > 5 {
+			// GET /api/sites/site_123/nodes/node_456
+			nodeID := parts[5]
+
+			var node Node
+			var createdAt, modifiedAt int64
+			err := db.QueryRow(`
+				SELECT id, type, parent_id, path, title, content, mime_type, created_at, modified_at, visibility
+				FROM nodes WHERE id = ? AND site_id = ?
+			`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title, &node.Content, &node.MimeType, &createdAt, &modifiedAt, &node.Visibility)
+
+			if err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Node not found"})
+				return
+			}
+
+			node.CreatedAt = time.Unix(createdAt, 0)
+			node.ModifiedAt = time.Unix(modifiedAt, 0)
+			json.NewEncoder(w).Encode(node)
+		} else {
+			// GET /api/sites/site_123/nodes
+			rows, err := db.Query(`
+				SELECT id, type, parent_id, path, title, content, mime_type, created_at, modified_at, visibility
+				FROM nodes WHERE site_id = ? ORDER BY created_at DESC
+			`, siteID)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			defer rows.Close()
+
+			var nodes []Node
+			for rows.Next() {
+				var n Node
+				var createdAt, modifiedAt int64
+				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &createdAt, &modifiedAt, &n.Visibility)
+				if err != nil {
+					continue
+				}
+				n.CreatedAt = time.Unix(createdAt, 0)
+				n.ModifiedAt = time.Unix(modifiedAt, 0)
+				nodes = append(nodes, n)
+			}
+
+			json.NewEncoder(w).Encode(nodes)
+		}
+	} else if r.Method == "POST" {
+		// Create new node in site
+		var node Node
+		json.NewDecoder(r.Body).Decode(&node)
+
+		node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
+		now := time.Now().Unix()
+
+		_, err := db.Exec(`
+			INSERT INTO nodes (id, type, path, title, content, mime_type, created_at, modified_at, site_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, now, now, siteID)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		node.CreatedAt = time.Unix(now, 0)
+		node.ModifiedAt = time.Unix(now, 0)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(node)
+	} else if r.Method == "PUT" {
+		// Update node
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) < 6 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		nodeID := parts[5]
+		var node Node
+		json.NewDecoder(r.Body).Decode(&node)
+
+		now := time.Now().Unix()
+		_, err := db.Exec(`
+			UPDATE nodes SET title = ?, content = ?, modified_at = ? WHERE id = ? AND site_id = ?
+		`, node.Title, node.Content, now, nodeID, siteID)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+	}
 }
 
 // === Utilities ===

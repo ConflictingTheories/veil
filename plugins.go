@@ -1,0 +1,175 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+)
+
+// === Plugin Architecture ===
+
+// Plugin is the interface all integrations must implement
+type Plugin interface {
+	Name() string
+	Version() string
+	Initialize(config map[string]interface{}) error
+	Execute(ctx context.Context, action string, payload interface{}) (interface{}, error)
+	Validate() error
+	Shutdown() error
+}
+
+// PluginRegistry manages all plugins
+type PluginRegistry struct {
+	plugins map[string]Plugin
+	mu      sync.RWMutex
+}
+
+var pluginRegistry *PluginRegistry
+
+func initPluginRegistry() {
+	pluginRegistry = &PluginRegistry{
+		plugins: make(map[string]Plugin),
+	}
+}
+
+func (pr *PluginRegistry) Register(plugin Plugin) error {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+
+	if err := plugin.Validate(); err != nil {
+		return fmt.Errorf("plugin validation failed: %v", err)
+	}
+
+	name := plugin.Name()
+	if _, exists := pr.plugins[name]; exists {
+		return fmt.Errorf("plugin %s already registered", name)
+	}
+
+	pr.plugins[name] = plugin
+	return nil
+}
+
+func (pr *PluginRegistry) Get(name string) (Plugin, error) {
+	pr.mu.RLock()
+	defer pr.mu.RUnlock()
+
+	plugin, exists := pr.plugins[name]
+	if !exists {
+		return nil, fmt.Errorf("plugin %s not found", name)
+	}
+	return plugin, nil
+}
+
+func (pr *PluginRegistry) Execute(ctx context.Context, pluginName, action string, payload interface{}) (interface{}, error) {
+	plugin, err := pr.Get(pluginName)
+	if err != nil {
+		return nil, err
+	}
+
+	return plugin.Execute(ctx, action, payload)
+}
+
+func (pr *PluginRegistry) ListPlugins() []string {
+	pr.mu.RLock()
+	defer pr.mu.RUnlock()
+
+	var names []string
+	for name := range pr.plugins {
+		names = append(names, name)
+	}
+	return names
+}
+
+// === Publishing Channel System ===
+
+type PublishingChannel struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"` // git, ipfs, rss, static, ftp, scp, etc
+	Config    map[string]interface{} `json:"config"`
+	Active    bool                   `json:"active"`
+	CreatedAt int64                  `json:"created_at"`
+}
+
+type PublishJob struct {
+	ID          string      `json:"id"`
+	NodeID      string      `json:"node_id"`
+	VersionID   string      `json:"version_id"`
+	ChannelID   string      `json:"channel_id"`
+	Status      string      `json:"status"` // queued, publishing, success, failed
+	Progress    int         `json:"progress"`
+	Result      interface{} `json:"result,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	CreatedAt   int64       `json:"created_at"`
+	CompletedAt *int64      `json:"completed_at,omitempty"`
+}
+
+// CredentialManager handles encrypted storage of API keys
+type CredentialManager struct {
+	credentials map[string][]byte // Will be encrypted in production
+	mu          sync.RWMutex
+}
+
+var credentialMgr *CredentialManager
+
+func initCredentialManager() {
+	credentialMgr = &CredentialManager{
+		credentials: make(map[string][]byte),
+	}
+}
+
+func (cm *CredentialManager) StoreCredential(key string, value string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// In production, encrypt this
+	cm.credentials[key] = []byte(value)
+	return nil
+}
+
+func (cm *CredentialManager) GetCredential(key string) (string, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	value, exists := cm.credentials[key]
+	if !exists {
+		return "", fmt.Errorf("credential not found: %s", key)
+	}
+
+	return string(value), nil
+}
+
+func (cm *CredentialManager) DeleteCredential(key string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	delete(cm.credentials, key)
+	return nil
+}
+
+// === Configuration Storage ===
+
+type Config struct {
+	ID    string      `json:"id"`
+	Key   string      `json:"key"`
+	Value interface{} `json:"value"`
+}
+
+func saveConfig(key string, value interface{}) error {
+	configID := fmt.Sprintf("config_%s", key)
+	now := int64(0) // Will be time.Now().Unix() in context
+
+	// Save to database
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO configs (id, key, value, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, configID, key, fmt.Sprintf("%v", value), now)
+
+	return err
+}
+
+func loadConfig(key string) (interface{}, error) {
+	var value string
+	err := db.QueryRow(`SELECT value FROM configs WHERE key = ?`, key).Scan(&value)
+	return value, err
+}

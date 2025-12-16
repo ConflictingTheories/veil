@@ -1,464 +1,409 @@
-// Veil - Universal Content Management System
-// Frontend Application Logic
+// Veil - Your Personal OS
+// Frontend: Universal Content Platform with URI-First Architecture
+// Every entity has a URI: veil://site/path/entity
 
+let currentSite = null;
 let currentNode = null;
 let allNodes = [];
+let allSites = [];
 let autoSaveTimer = null;
 let autoSaveEnabled = true;
-let autoSaveInterval = 5000;
-let nodes_cache = {};
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
+// ====== INITIALIZATION ======
+document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
-    loadNodes();
-    setupAutoSave();
+    await loadSites();
+    await loadNodes();
     restoreSettings();
+    console.log('✓ Veil initialized');
 });
 
-// === Setup & Initialization ===
+// ====== EVENT SETUP ======
 function setupEventListeners() {
-    // Toolbar buttons
-    document.getElementById('boldBtn').onclick = () => insertMarkdown('**', '**', 'bold text');
-    document.getElementById('italicBtn').onclick = () => insertMarkdown('*', '*', 'italic text');
-    document.getElementById('codeBtn').onclick = () => insertMarkdown('`', '`', 'code');
-    document.getElementById('linkBtn').onclick = () => document.getElementById('linkModal').classList.remove('hidden');
-    
-    document.getElementById('publishBtn').onclick = () => document.getElementById('publishModal').classList.remove('hidden');
-    document.getElementById('exportBtn').onclick = () => document.getElementById('exportModal').classList.remove('hidden');
-    document.getElementById('versionBtn').onclick = showVersions;
-    document.getElementById('tagsBtn').onclick = () => document.getElementById('tagsModal').classList.remove('hidden');
-    document.getElementById('citationBtn').onclick = () => document.getElementById('citationModal').classList.remove('hidden');
-    document.getElementById('mediaBtn').onclick = () => document.getElementById('mediaModal').classList.remove('hidden');
-    
-    document.getElementById('autoSaveToggle').onclick = toggleAutoSave;
-    document.getElementById('settingsBtn').onclick = () => document.getElementById('settingsModal').classList.remove('hidden');
-    
     // Sidebar
-    document.getElementById('newNodeBtn').onclick = createNewNode;
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.onclick = (e) => switchSidebarTab(e.target.dataset.tab);
-    });
-    
-    // Search
-    document.getElementById('searchInput').addEventListener('input', (e) => filterNodes(e.target.value));
+    document.getElementById('newSiteBtn')?.addEventListener('click', createNewSite);
+    document.getElementById('newNoteBtn')?.addEventListener('click', createNewNote);
+    document.getElementById('settingsBtn')?.addEventListener('click', () => openModal('settingsModal'));
+    document.getElementById('globalSearch')?.addEventListener('input', (e) => filterNodes(e.target.value));
     
     // Editor
-    document.getElementById('editor').addEventListener('input', debounce(() => {
+    document.getElementById('editor')?.addEventListener('input', debounce(() => {
         if (currentNode) {
             currentNode.title = document.getElementById('editor').value.split('\n')[0] || 'Untitled';
             updatePreview();
+            updateWordCount();
             if (autoSaveEnabled) triggerAutoSave();
         }
-    }, 300));
+    }, 500));
     
-    // Modal close buttons
-    document.querySelectorAll('.modal-close').forEach(btn => {
-        btn.onclick = (e) => e.target.closest('.modal').classList.add('hidden');
+    // Toolbar
+    document.getElementById('boldBtn')?.addEventListener('click', () => insertMarkdown('**', '**', 'bold text'));
+    document.getElementById('italicBtn')?.addEventListener('click', () => insertMarkdown('*', '*', 'italic text'));
+    document.getElementById('codeBtn')?.addEventListener('click', () => insertMarkdown('`', '`', 'code'));
+    document.getElementById('linkBtn')?.addEventListener('click', () => openModal('linkModal'));
+    document.getElementById('tagsBtn')?.addEventListener('click', () => openModal('tagsModal'));
+    document.getElementById('mediaBtn')?.addEventListener('click', () => openModal('mediaModal'));
+    document.getElementById('versionsBtn')?.addEventListener('click', showVersions);
+    document.getElementById('publishBtn')?.addEventListener('click', () => openModal('publishModal'));
+    
+    // Modals
+    document.querySelectorAll('[data-modal-close]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const modal = e.target.closest('.modal-overlay');
+            if (modal) closeModal(modal.id);
+        });
     });
     
-    document.querySelectorAll('.modal .btn-secondary').forEach(btn => {
-        btn.onclick = (e) => {
-            let modal = e.target.closest('.modal');
-            modal.classList.add('hidden');
-        };
+    document.querySelectorAll('.modal-overlay').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal(modal.id);
+        });
     });
     
-    // Modal specific handlers
-    document.getElementById('confirmPublish').onclick = publishNode;
-    document.getElementById('confirmExport').onclick = exportNode;
-    document.getElementById('addTagBtn').onclick = addTagToNode;
-    document.getElementById('uploadMediaBtn').onclick = uploadMedia;
-    document.getElementById('addCitationBtn').onclick = addCitation;
-    
-    // Settings
-    document.getElementById('settingsBtn').onclick = openSettings;
-    document.getElementById('autoSaveCheckbox').onchange = (e) => {
+    document.getElementById('confirmPublish')?.addEventListener('click', publishNode);
+    document.getElementById('autoSaveToggle')?.addEventListener('change', (e) => {
         autoSaveEnabled = e.target.checked;
         localStorage.setItem('autoSaveEnabled', autoSaveEnabled);
-    };
-    document.getElementById('autoSaveInterval').onchange = (e) => {
-        autoSaveInterval = e.target.value * 1000;
-        localStorage.setItem('autoSaveInterval', autoSaveInterval);
-    };
-    document.getElementById('darkModeToggle').onchange = (e) => {
-        document.body.classList.toggle('dark-mode');
-        localStorage.setItem('darkMode', e.target.checked);
-    };
+    });
 }
 
-// === Node Management ===
-async function loadNodes() {
+// ====== SITE MANAGEMENT ======
+async function loadSites() {
     try {
-        const resp = await fetch('/api/nodes');
+        const resp = await fetch('/api/sites');
+        allSites = await resp.json() || [];
+        renderSitesList();
+    } catch (e) {
+        console.error('Failed to load sites:', e);
+    }
+}
+
+function renderSitesList() {
+    const list = document.getElementById('sitesList');
+    if (!list) return;
+    
+    list.innerHTML = (allSites || []).map(site => `
+        <div class="p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
+            site.id === currentSite?.id ? 'border-indigo-600 bg-indigo-50' : 'border-transparent'
+        }" onclick="selectSite('${site.id}')">
+            <div class="font-medium text-slate-900 text-sm">${site.name}</div>
+            <div class="text-xs text-slate-500 mt-1">${site.description || 'No description'}</div>
+        </div>
+    `).join('');
+}
+
+async function selectSite(siteId) {
+    const site = allSites.find(s => s.id === siteId);
+    if (!site) return;
+    
+    currentSite = site;
+    currentNode = null;
+    document.getElementById('editor').value = '';
+    document.getElementById('breadcrumb').innerHTML = `<span>${site.name}</span>`;
+    document.title = `${site.name} - Veil`;
+    
+    renderSitesList();
+    await loadNodes();
+}
+
+async function createNewSite() {
+    const name = prompt('Site name (e.g., "My Portfolio", "Blog", "Game Dev"):');
+    if (!name) return;
+    
+    const description = prompt('Brief description:') || '';
+    
+    try {
+        const resp = await fetch('/api/sites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, type: 'project' })
+        });
+        const site = await resp.json();
+        allSites.push(site);
+        renderSitesList();
+        await selectSite(site.id);
+        alert(`✓ Site created: ${name}`);
+    } catch (e) {
+        console.error('Failed to create site:', e);
+        alert('Failed to create site');
+    }
+}
+
+// ====== NODE MANAGEMENT ======
+async function loadNodes() {
+    if (!currentSite) return;
+    
+    try {
+        const resp = await fetch(`/api/sites/${currentSite.id}/nodes`);
         allNodes = await resp.json() || [];
-        nodes_cache = {};
-        allNodes.forEach(n => nodes_cache[n.id] = n);
-        renderNodeTree();
+        renderNodesList();
     } catch (e) {
         console.error('Failed to load nodes:', e);
     }
 }
 
-function renderNodeTree() {
-    const tree = document.getElementById('fileTree');
-    tree.innerHTML = '';
+function renderNodesList() {
+    const list = document.getElementById('nodesList');
+    if (!list) return;
     
-    const rootNodes = allNodes.filter(n => !n.parent_id);
-    rootNodes.forEach(node => {
-        const item = document.createElement('div');
-        item.className = 'tree-item';
-        item.textContent = node.title || node.path || 'Untitled';
-        item.onclick = () => openNode(node);
-        tree.appendChild(item);
-    });
+    list.innerHTML = (allNodes || []).map(n => `
+        <div onclick="openNode('${n.id}')" 
+            class="p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
+                n.id === currentNode?.id ? 'border-indigo-600 bg-indigo-50' : 'border-transparent'
+            }">
+            <div class="font-medium text-slate-900 text-sm flex items-center gap-2">
+                <span class="text-xs px-2 py-0.5 bg-slate-200 rounded-full">${n.type || 'note'}</span>
+                ${n.title || 'Untitled'}
+            </div>
+            <div class="text-xs text-slate-500 mt-1">${n.path}</div>
+        </div>
+    `).join('');
 }
 
 function filterNodes(query) {
-    const filtered = allNodes.filter(n => 
-        n.title?.includes(query) || n.content?.includes(query) || n.path?.includes(query)
+    if (!query) {
+        renderNodesList();
+        return;
+    }
+    
+    const filtered = (allNodes || []).filter(n =>
+        n.title?.toLowerCase().includes(query.toLowerCase()) ||
+        n.content?.toLowerCase().includes(query.toLowerCase())
     );
     
-    const tree = document.getElementById('fileTree');
-    tree.innerHTML = '';
-    filtered.forEach(node => {
-        const item = document.createElement('div');
-        item.className = 'tree-item';
-        item.textContent = node.title || 'Untitled';
-        item.onclick = () => openNode(node);
-        tree.appendChild(item);
-    });
+    const list = document.getElementById('nodesList');
+    list.innerHTML = filtered.map(n => `
+        <div onclick="openNode('${n.id}')" class="p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 border-transparent">
+            <div class="font-medium text-slate-900 text-sm">${n.title || 'Untitled'}</div>
+            <div class="text-xs text-slate-500 mt-1">${n.path}</div>
+        </div>
+    `).join('');
 }
 
-async function openNode(node) {
-    currentNode = node;
-    document.getElementById('editor').value = node.content || '';
-    document.title = `${node.title} - Veil`;
-    updatePreview();
-    loadReferences();
-    loadVersions();
-    loadTags();
-    updateBreadcrumb(node);
-    document.getElementById('statusText').textContent = `Opened: ${node.title}`;
+async function openNode(nodeId) {
+    try {
+        const resp = await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}`);
+        currentNode = await resp.json();
+        
+        document.getElementById('editor').value = currentNode.content || '';
+        document.getElementById('breadcrumb').innerHTML = `<span>${currentNode.title || 'Untitled'}</span>`;
+        document.title = `${currentNode.title} - ${currentSite.name} - Veil`;
+        
+        updatePreview();
+        updateWordCount();
+        loadReferences();
+        
+        renderNodesList();
+    } catch (e) {
+        console.error('Failed to open node:', e);
+    }
 }
 
-function createNewNode() {
-    const title = prompt('Node title:');
+async function createNewNote() {
+    if (!currentSite) {
+        alert('Please select or create a site first');
+        return;
+    }
+    
+    const title = prompt('Note title:');
     if (!title) return;
     
-    fetch('/api/node-create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            type: 'note',
-            path: title.toLowerCase().replace(/\s+/g, '-') + '.md',
-            title: title,
-            content: '# ' + title + '\n\n',
-            mime_type: 'text/markdown'
-        })
-    }).then(() => loadNodes()).catch(e => console.error(e));
+    try {
+        const resp = await fetch(`/api/sites/${currentSite.id}/nodes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'note',
+                path: title.toLowerCase().replace(/\s+/g, '-') + '.md',
+                title: title,
+                content: '# ' + title + '\n\n',
+                mime_type: 'text/markdown'
+            })
+        });
+        const node = await resp.json();
+        allNodes.push(node);
+        renderNodesList();
+        await openNode(node.id);
+        alert(`✓ Note created: ${title}`);
+    } catch (e) {
+        console.error('Failed to create note:', e);
+        alert('Failed to create note');
+    }
 }
 
+// ====== EDITING ======
 async function saveCurrentNode() {
-    if (!currentNode) return;
+    if (!currentNode || !currentSite) return;
     
     currentNode.content = document.getElementById('editor').value;
+    currentNode.title = currentNode.content.split('\n')[0] || 'Untitled';
     
-    await fetch('/api/node-update', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentNode)
-    });
-    
-    document.getElementById('statusText').textContent = '✓ Saved: ' + currentNode.title;
-}
-
-// === Auto-save ===
-function setupAutoSave() {
-    autoSaveCheckbox = document.getElementById('autoSaveCheckbox');
-    autoSaveCheckbox.checked = localStorage.getItem('autoSaveEnabled') !== 'false';
-    autoSaveEnabled = autoSaveCheckbox.checked;
-    
-    const interval = localStorage.getItem('autoSaveInterval');
-    if (interval) autoSaveInterval = parseInt(interval);
-}
-
-function toggleAutoSave() {
-    autoSaveEnabled = !autoSaveEnabled;
-    const btn = document.getElementById('autoSaveToggle');
-    btn.classList.toggle('active');
-    localStorage.setItem('autoSaveEnabled', autoSaveEnabled);
-    document.getElementById('statusText').textContent = 'Auto-save ' + (autoSaveEnabled ? 'enabled' : 'disabled');
+    try {
+        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentNode)
+        });
+        
+        showStatusBadge('Saved', 'green');
+    } catch (e) {
+        console.error('Save failed:', e);
+        showStatusBadge('Save failed', 'red');
+    }
 }
 
 function triggerAutoSave() {
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
-        if (currentNode && autoSaveEnabled) {
-            saveCurrentNode();
-        }
-    }, autoSaveInterval);
+        if (currentNode && autoSaveEnabled) saveCurrentNode();
+    }, 3000);
 }
 
-// === Publishing ===
-async function publishNode() {
-    if (!currentNode) return;
-    
-    const isPublic = document.getElementById('publishPublic').checked;
-    const toWebsite = document.getElementById('publishWebsite').checked;
-    const toRSS = document.getElementById('publishRSS').checked;
-    
-    await fetch('/api/publish?node_id=' + currentNode.id, { method: 'POST' });
-    
-    if (isPublic) {
-        await fetch('/api/visibility?node_id=' + currentNode.id + '&visibility=public', { method: 'PUT' });
-    }
-    
-    document.getElementById('publishModal').classList.add('hidden');
-    document.getElementById('statusText').textContent = '✓ Published: ' + currentNode.title;
+// ====== PREVIEW ======
+function updatePreview() {
+    const content = document.getElementById('editor').value;
+    const html = markdownToHtml(content);
+    document.getElementById('preview').innerHTML = html;
 }
 
-// === Export ===
-async function exportNode() {
-    if (!currentNode) return;
-    
-    const format = document.querySelector('input[name="exportFormat"]:checked')?.value || 'zip';
-    const includeMedia = document.getElementById('exportIncludeMedia').checked;
-    
-    const url = `/api/export?node_id=${currentNode.id}&format=${format}&media=${includeMedia ? '1' : '0'}`;
-    window.location.href = url;
-    
-    document.getElementById('exportModal').classList.add('hidden');
+function markdownToHtml(md) {
+    let html = md
+        .replace(/^### (.*?)$/gm, '<h3 class="text-lg font-bold mt-4 mb-2">$1</h3>')
+        .replace(/^## (.*?)$/gm, '<h2 class="text-xl font-bold mt-4 mb-2">$1</h2>')
+        .replace(/^# (.*?)$/gm, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__(.*?)__/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/_(.*?)_/g, '<em>$1</em>')
+        .replace(/`([^`]*)`/g, '<code class="bg-slate-100 px-2 py-1 rounded text-red-600 text-sm">$1</code>')
+        .replace(/\[\[(.*?)\]\]/g, '<a href="#" class="text-indigo-600 hover:underline">$1</a>')
+        .replace(/\n\n/g, '</p><p class="mb-3">')
+        .replace(/\n/g, '<br>');
+    return '<p class="mb-3 text-slate-700">' + html + '</p>';
 }
 
-// === Versions ===
+function updateWordCount() {
+    const text = document.getElementById('editor').value;
+    const words = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+    const chars = text.length;
+    
+    const countEl = document.getElementById('wordCount');
+    if (countEl) countEl.textContent = `${words} words • ${chars} characters`;
+}
+
+// ====== VERSIONING ======
 async function showVersions() {
-    if (!currentNode) return;
+    if (!currentNode || !currentSite) return;
     
     try {
-        const resp = await fetch('/api/versions?node_id=' + currentNode.id);
+        const resp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/versions`);
         const versions = await resp.json() || [];
         
         const list = document.getElementById('versionsList');
-        list.innerHTML = versions.map(v => `
-            <div class="version-item">
-                <strong>v${v.version_number}</strong> - ${v.status}
-                <small>${new Date(v.created_at * 1000).toLocaleString()}</small>
-                <button onclick="rollbackVersion('${v.id}')">Restore</button>
+        list.innerHTML = (versions || []).map(v => `
+            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="font-medium text-sm">v${v.version_number}</div>
+                        <div class="text-xs text-slate-500">${new Date(v.created_at * 1000).toLocaleString()}</div>
+                        <div class="text-xs text-slate-600 mt-1 capitalize">${v.status}</div>
+                    </div>
+                    <button onclick="rollbackVersion('${v.id}')" 
+                        class="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
+                        Restore
+                    </button>
+                </div>
             </div>
         `).join('');
         
-        document.getElementById('versionsModal').classList.remove('hidden');
+        openModal('versionsModal');
     } catch (e) {
         console.error('Failed to load versions:', e);
     }
 }
 
 async function rollbackVersion(versionId) {
-    await fetch('/api/rollback?version_id=' + versionId, { method: 'POST' });
-    location.reload();
-}
-
-// === References & Linking ===
-async function loadReferences() {
-    if (!currentNode) return;
+    if (!currentNode || !currentSite) return;
     
     try {
-        // Load backlinks
-        const backResp = await fetch('/api/backlinks/' + currentNode.id);
+        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/versions/${versionId}/rollback`, {
+            method: 'POST'
+        });
+        await openNode(currentNode.id);
+        alert('✓ Restored to previous version');
+    } catch (e) {
+        console.error('Rollback failed:', e);
+        alert('Failed to rollback');
+    }
+}
+
+// ====== REFERENCES ======
+async function loadReferences() {
+    if (!currentNode || !currentSite) return;
+    
+    try {
+        const backResp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/backlinks`);
         const backlinks = await backResp.json() || [];
         
-        // Load forward links
-        const fwdResp = await fetch('/api/references?source=' + currentNode.id);
+        const fwdResp = await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/references`);
         const references = await fwdResp.json() || [];
         
-        document.getElementById('linkedFromList').innerHTML = backlinks.map(r => 
-            `<li><a onclick="openNode(nodes_cache['${r.source_node_id}'])">${nodes_cache[r.source_node_id]?.title}</a></li>`
-        ).join('') || '<li>No backlinks</li>';
+        document.getElementById('backlinks').innerHTML = (backlinks || []).length ?
+            (backlinks || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">← ${r.link_text || 'Link'}</li>`).join('') :
+            '<li class="text-slate-500">No backlinks</li>';
         
-        document.getElementById('linksToList').innerHTML = references.map(r => 
-            `<li><a onclick="openNode(nodes_cache['${r.target_node_id}'])">${nodes_cache[r.target_node_id]?.title}</a></li>`
-        ).join('') || '<li>No links</li>';
+        document.getElementById('forwardlinks').innerHTML = (references || []).length ?
+            (references || []).map(r => `<li class="text-indigo-600 cursor-pointer hover:underline">→ ${r.link_text || 'Link'}</li>`).join('') :
+            '<li class="text-slate-500">No links</li>';
     } catch (e) {
         console.error('Failed to load references:', e);
     }
 }
 
-function insertWikiLink(nodeId) {
-    const editor = document.getElementById('editor');
-    const node = nodes_cache[nodeId];
-    if (!node) return;
+// ====== PUBLISHING ======
+async function publishNode() {
+    if (!currentNode || !currentSite) return;
     
-    const link = `[[${node.title}]]`;
-    editor.value += link;
-    editor.focus();
-    triggerAutoSave();
-    document.getElementById('linkModal').classList.add('hidden');
-}
-
-// === Tags ===
-async function loadTags() {
-    if (!currentNode) return;
+    const isPublic = document.getElementById('publishPublic')?.checked || false;
     
     try {
-        const resp = await fetch('/api/node-tags?node_id=' + currentNode.id);
-        const tags = await resp.json() || [];
+        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visibility: isPublic ? 'public' : 'private' })
+        });
         
-        document.getElementById('nodeTagsList').innerHTML = tags.map(t => 
-            `<span class="tag-chip" style="background:${t.color}">${t.name}</span>`
-        ).join('');
+        closeModal('publishModal');
+        alert('✓ Published: ' + currentNode.title);
+        showStatusBadge('Published', 'green');
     } catch (e) {
-        console.error('Failed to load tags:', e);
+        console.error('Publish failed:', e);
+        alert('Failed to publish');
     }
 }
 
-async function addTagToNode() {
-    if (!currentNode) return;
+// ====== TAGS ======
+async function addTag() {
+    if (!currentNode || !currentSite) return;
     
-    const name = document.getElementById('newTagInput').value;
-    const color = document.getElementById('tagColorInput').value;
-    
+    const name = document.getElementById('newTagInput')?.value;
     if (!name) return;
     
-    // Create tag and associate with node
-    // Implementation would call API to create tag and add to node
-    
-    document.getElementById('newTagInput').value = '';
-    loadTags();
-}
-
-// === Media ===
-async function uploadMedia() {
-    const files = document.getElementById('mediaUpload').files;
-    
-    for (let file of files) {
-        const form = new FormData();
-        form.append('file', file);
-        
-        try {
-            const resp = await fetch('/api/media-upload', {
-                method: 'POST',
-                body: form
-            });
-            const media = await resp.json();
-            console.log('Uploaded:', media);
-        } catch (e) {
-            console.error('Upload failed:', e);
-        }
-    }
-    
-    document.getElementById('mediaUpload').value = '';
-    loadMediaLibrary();
-}
-
-async function loadMediaLibrary() {
     try {
-        const resp = await fetch('/api/media-library?user_id=current');
-        const media = await resp.json() || [];
+        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
         
-        document.getElementById('mediaGrid').innerHTML = media.map(m => 
-            `<div class="media-item"><strong>${m.filename}</strong></div>`
-        ).join('');
+        document.getElementById('newTagInput').value = '';
+        alert(`✓ Tag added: ${name}`);
     } catch (e) {
-        console.error('Failed to load media:', e);
+        console.error('Failed to add tag:', e);
     }
 }
 
-// === Citations ===
-async function addCitation() {
-    const citation = {
-        citation_key: document.getElementById('citationKey').value,
-        authors: document.getElementById('citationAuthors').value,
-        title: document.getElementById('citationTitle').value,
-        year: parseInt(document.getElementById('citationYear').value) || 0,
-        doi: document.getElementById('citationDOI').value,
-        url: document.getElementById('citationURL').value,
-        citation_format: document.getElementById('citationFormat').value
-    };
-    
-    // Call API to save citation
-    console.log('Citation:', citation);
-    
-    // Clear form
-    Object.keys(citation).forEach(k => {
-        const el = document.getElementById('citation' + k.charAt(0).toUpperCase() + k.slice(1));
-        if (el) el.value = '';
-    });
-}
-
-// === Preview & Rendering ===
-function updatePreview() {
-    const content = document.getElementById('editor').value;
-    const html = markdownToHtml(content);
-    document.getElementById('preview').innerHTML = html;
-    updateWordCount(content);
-}
-
-function markdownToHtml(md) {
-    let html = md;
-    // Headers
-    html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
-    // Bold/Italic
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/_(.*?)_/g, '<em>$1</em>');
-    // Code
-    html = html.replace(/`(.*?)`/g, '<code>$1</code>');
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
-    // Wiki links
-    html = html.replace(/\[\[(.*?)\]\]/g, '<a href="#">[[$1]]</a>');
-    return html;
-}
-
-function updateWordCount(text) {
-    const words = text.trim().split(/\s+/).length;
-    document.getElementById('wordCount').textContent = words;
-}
-
-function updateBreadcrumb(node) {
-    document.getElementById('breadcrumb').textContent = node.path || node.title || 'Untitled';
-}
-
-// === Settings ===
-function openSettings() {
-    document.getElementById('settingsModal').classList.remove('hidden');
-}
-
-function restoreSettings() {
-    const darkMode = localStorage.getItem('darkMode') === 'true';
-    if (darkMode) {
-        document.body.classList.add('dark-mode');
-        document.getElementById('darkModeToggle').checked = true;
-    }
-    
-    const interval = localStorage.getItem('autoSaveInterval');
-    if (interval) {
-        document.getElementById('autoSaveInterval').value = parseInt(interval) / 1000;
-    }
-}
-
-// === Sidebar ===
-function switchSidebarTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    
-    event.target.classList.add('active');
-    document.getElementById(tab + '-tab').classList.add('active');
-}
-
-// === Utilities ===
-function debounce(fn, delay) {
-    let timeout;
-    return function(...args) {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => fn(...args), delay);
-    };
-}
-
+// ====== UI UTILITIES ======
 function insertMarkdown(before, after, placeholder) {
     const editor = document.getElementById('editor');
     const start = editor.selectionStart;
@@ -470,5 +415,48 @@ function insertMarkdown(before, after, placeholder) {
     editor.focus();
     editor.selectionStart = start + before.length;
     editor.selectionEnd = start + before.length + selected.length;
+    
     triggerAutoSave();
+    updatePreview();
+}
+
+function openModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.classList.add('hidden');
+}
+
+function showStatusBadge(message, color = 'green') {
+    const badge = document.getElementById('statusBadge');
+    if (!badge) return;
+    
+    const colorMap = {
+        green: 'bg-green-100 text-green-700',
+        red: 'bg-red-100 text-red-700',
+        yellow: 'bg-yellow-100 text-yellow-700'
+    };
+    
+    badge.className = `text-xs px-3 py-1 rounded-full ${colorMap[color]}`;
+    badge.innerHTML = `<i class="fas fa-circle animate-pulse mr-1"></i>${message}`;
+}
+
+function restoreSettings() {
+    const autoSave = localStorage.getItem('autoSaveEnabled') !== 'false';
+    const toggle = document.getElementById('autoSaveToggle');
+    if (toggle) {
+        toggle.checked = autoSave;
+        autoSaveEnabled = autoSave;
+    }
+}
+
+function debounce(fn, delay) {
+    let timeout;
+    return function (...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => fn(...args), delay);
+    };
 }
