@@ -241,15 +241,35 @@ func handleResolveLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUniversalURI(w http.ResponseWriter, r *http.Request) {
-	// Extract URI from path: /veil/site/path/entity
+	// Extract URI from path: /veil/note/{id} or /veil/{siteName}/{path}
 	path := strings.TrimPrefix(r.URL.Path, "/veil/")
 	parts := strings.Split(path, "/")
 
 	if len(parts) < 2 {
 		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid URI"))
 		return
 	}
 
+	// Handle /veil/note/{nodeId} format
+	if parts[0] == "note" || parts[0] == "node" {
+		nodeID := parts[1]
+
+		// Find site for this node
+		var siteID string
+		err := db.QueryRow(`SELECT site_id FROM nodes WHERE id = ? AND deleted_at IS NULL`, nodeID).Scan(&siteID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Node not found"))
+			return
+		}
+
+		// Redirect to preview
+		http.Redirect(w, r, fmt.Sprintf("/preview/%s/%s", siteID, nodeID), http.StatusFound)
+		return
+	}
+
+	// Original path-based resolution
 	siteName := parts[0]
 	entityPath := strings.Join(parts[1:], "/")
 
@@ -259,38 +279,23 @@ func handleUniversalURI(w http.ResponseWriter, r *http.Request) {
 		Scan(&site.ID, &site.Name)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Site not found"))
 		return
 	}
 
 	// Find node by path within site
 	var node Node
 	var created, modified int64
-	err = db.QueryRow(`SELECT id, type, path, title, content, mime_type, created_at, modified_at FROM nodes WHERE site_id = ? AND path = ?`, site.ID, entityPath).
+	err = db.QueryRow(`SELECT id, type, path, title, content, mime_type, created_at, modified_at FROM nodes WHERE site_id = ? AND path = ? AND deleted_at IS NULL`, site.ID, entityPath).
 		Scan(&node.ID, &node.Type, &node.Path, &node.Title, &node.Content, &node.MimeType, &created, &modified)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Node not found"))
 		return
 	}
 
-	node.CreatedAt = time.Unix(created, 0)
-	node.ModifiedAt = time.Unix(modified, 0)
-
-	// Render based on content type
-	switch node.Type {
-	case NodeTypeImage, NodeTypeVideo, NodeTypeAudio:
-		// Serve media content
-		w.Header().Set("Content-Type", node.MimeType)
-		w.Write([]byte(node.Content))
-	case NodeTypeShaderDemo:
-		// Render shader demo
-		renderShaderDemo(w, node)
-	case NodeTypeCanvas:
-		// Render canvas content
-		renderCanvas(w, node)
-	default:
-		// Render as HTML page
-		renderNodeAsHTML(w, node, site)
-	}
+	// Redirect to preview
+	http.Redirect(w, r, fmt.Sprintf("/preview/%s/%s", site.ID, node.ID), http.StatusFound)
 }
 
 func renderNodeAsHTML(w http.ResponseWriter, node Node, site Site) {
@@ -549,8 +554,43 @@ func handleMedia(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	mediaID := r.URL.Query().Get("id")
 
+	// If no ID specified, list all media
+	if mediaID == "" {
+		rows, err := db.Query(`SELECT id, COALESCE(node_id, ''), filename, storage_url, COALESCE(checksum, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(uploaded_by, ''), created_at FROM media ORDER BY created_at DESC`)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		var mediaList []map[string]interface{}
+		for rows.Next() {
+			var id, nodeID, filename, storageURL, checksum, mimeType, uploadedBy string
+			var fileSize int64
+			var createdAt int64
+			rows.Scan(&id, &nodeID, &filename, &storageURL, &checksum, &mimeType, &fileSize, &uploadedBy, &createdAt)
+			mediaList = append(mediaList, map[string]interface{}{
+				"id":          id,
+				"node_id":     nodeID,
+				"filename":    filename,
+				"url":         storageURL,
+				"checksum":    checksum,
+				"mime_type":   mimeType,
+				"size":        fileSize,
+				"uploaded_by": uploadedBy,
+				"created_at":  createdAt,
+			})
+		}
+		if mediaList == nil {
+			mediaList = []map[string]interface{}{}
+		}
+		json.NewEncoder(w).Encode(mediaList)
+		return
+	}
+
 	var media MediaFile
-	db.QueryRow(`SELECT id, node_id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at FROM media WHERE id = ?`, mediaID).
+	db.QueryRow(`SELECT id, COALESCE(node_id, ''), filename, storage_url, COALESCE(checksum, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(uploaded_by, ''), created_at FROM media WHERE id = ?`, mediaID).
 		Scan(&media.ID, &media.NodeID, &media.Filename, &media.StorageURL, &media.Checksum, &media.MimeType, &media.FileSize, &media.UploadedBy, &media.CreatedAt)
 
 	json.NewEncoder(w).Encode(media)
@@ -1126,6 +1166,48 @@ WHERE nr.target_node_id = ? AND n.deleted_at IS NULL
 // Handle node references (forward links) for a specific site/node
 func handleNodeReferences(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "POST" {
+		// Create a new reference
+		var req struct {
+			TargetNodeID string `json:"target_node_id"`
+			LinkText     string `json:"link_text"`
+			LinkType     string `json:"link_type"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.TargetNodeID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "target_node_id required"})
+			return
+		}
+
+		refID := fmt.Sprintf("ref_%d", time.Now().UnixNano())
+		now := time.Now().Unix()
+		linkType := req.LinkType
+		if linkType == "" {
+			linkType = "internal"
+		}
+
+		_, err := db.Exec(`
+			INSERT INTO node_references (id, source_node_id, target_node_id, link_type, link_text, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, refID, nodeID, req.TargetNodeID, linkType, req.LinkText, now)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":     refID,
+			"status": "created",
+		})
+		return
+	}
+
 	rows, err := db.Query(`
 SELECT DISTINCT n.id, n.title, n.type, n.path, nr.link_type, nr.link_text
 FROM nodes n

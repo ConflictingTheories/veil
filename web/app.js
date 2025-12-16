@@ -1039,7 +1039,8 @@ async function insertLink() {
     let linkUrl = '';
     
     if (type === 'internal' && selectedLinkNode) {
-        linkUrl = `veil://note/${selectedLinkNode.id}`;
+        // Use relative path instead of veil:// for now - will be resolved by routing
+        linkUrl = `/veil/note/${selectedLinkNode.id}`;
         
         // Create reference in database
         if (currentNode && currentSite) {
@@ -1218,19 +1219,21 @@ function openMediaUpload() {
                 body: formData
             });
             
-            if (response.ok) {
-                const data = await response.json();
+            const data = await response.json();
+            
+            if (response.ok && data.url) {
                 const editor = document.getElementById('editor');
                 const mediaMarkdown = `\n![${file.name}](${data.url})\n`;
-                editor.value += mediaMarkdown;
+                const start = editor.selectionStart;
+                editor.value = editor.value.substring(0, start) + mediaMarkdown + editor.value.substring(start);
                 editor.dispatchEvent(new Event('input'));
                 showToast('Media uploaded successfully');
             } else {
-                showToast('Upload failed', 'error');
+                showToast('Upload failed: ' + (data.error || 'Unknown error'), 'error');
             }
         } catch (err) {
             console.error('Upload error:', err);
-            showToast('Upload error', 'error');
+            showToast('Upload error: ' + err.message, 'error');
         }
     };
     input.click();
@@ -1290,5 +1293,183 @@ document.addEventListener('DOMContentLoaded', function() {
     const previewBtn = document.getElementById('previewBtn');
     if (previewBtn) {
         previewBtn.addEventListener('click', openPreview);
+    }
+});
+
+// Context menu system
+let contextMenu = null;
+
+function createContextMenu() {
+    if (contextMenu) {
+        contextMenu.remove();
+    }
+    
+    contextMenu = document.createElement('div');
+    contextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    contextMenu.style.minWidth = '200px';
+    contextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="preview">
+            <i class="fas fa-eye mr-2"></i>Preview
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="copy-link">
+            <i class="fas fa-link mr-2"></i>Copy Link
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="duplicate">
+            <i class="fas fa-copy mr-2"></i>Duplicate
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="export">
+            <i class="fas fa-download mr-2"></i>Export
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="publish">
+            <i class="fas fa-rocket mr-2"></i>Publish
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
+            <i class="fas fa-trash mr-2"></i>Delete
+        </div>
+    `;
+    
+    document.body.appendChild(contextMenu);
+    
+    // Handle menu actions
+    contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleContextMenuAction);
+    });
+    
+    return contextMenu;
+}
+
+function showContextMenu(e, nodeId) {
+    e.preventDefault();
+    
+    if (!contextMenu) {
+        createContextMenu();
+    }
+    
+    contextMenu.dataset.nodeId = nodeId;
+    contextMenu.style.left = e.pageX + 'px';
+    contextMenu.style.top = e.pageY + 'px';
+    contextMenu.classList.remove('hidden');
+    
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideContextMenu);
+    }, 10);
+}
+
+function hideContextMenu() {
+    if (contextMenu) {
+        contextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hideContextMenu);
+}
+
+async function handleContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const nodeId = contextMenu.dataset.nodeId;
+    
+    hideContextMenu();
+    
+    switch(action) {
+        case 'preview':
+            if (currentSite) {
+                window.open(`/preview/${currentSite.id}/${nodeId}`, '_blank');
+            }
+            break;
+        case 'copy-link':
+            if (currentSite) {
+                const link = `/veil/note/${nodeId}`;
+                navigator.clipboard.writeText(window.location.origin + link);
+                showToast('Link copied to clipboard');
+            }
+            break;
+        case 'duplicate':
+            await duplicateNode(nodeId);
+            break;
+        case 'export':
+            window.location.href = `/api/export?node_id=${nodeId}`;
+            break;
+        case 'publish':
+            await publishNode(nodeId);
+            break;
+        case 'delete':
+            if (confirm('Are you sure you want to delete this note?')) {
+                await deleteNode(nodeId);
+            }
+            break;
+    }
+}
+
+async function duplicateNode(nodeId) {
+    try {
+        const response = await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}`);
+        const original = await response.json();
+        
+        const duplicate = {
+            type: original.type,
+            title: original.title + ' (Copy)',
+            content: original.content,
+            path: original.path.replace(/\.md$/, '-copy.md')
+        };
+        
+        const createResponse = await fetch(`/api/sites/${currentSite.id}/nodes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(duplicate)
+        });
+        
+        if (createResponse.ok) {
+            showToast('Note duplicated');
+            loadNotes();
+        }
+    } catch (err) {
+        console.error('Duplicate error:', err);
+        showToast('Failed to duplicate', 'error');
+    }
+}
+
+async function publishNode(nodeId) {
+    try {
+        await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}/publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visibility: 'public' })
+        });
+        showToast('Note published');
+    } catch (err) {
+        console.error('Publish error:', err);
+        showToast('Failed to publish', 'error');
+    }
+}
+
+async function deleteNode(nodeId) {
+    try {
+        await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}`, {
+            method: 'DELETE'
+        });
+        showToast('Note deleted');
+        if (currentNode && currentNode.id === nodeId) {
+            currentNode = null;
+            document.getElementById('editor').value = '';
+        }
+        loadNotes();
+    } catch (err) {
+        console.error('Delete error:', err);
+        showToast('Failed to delete', 'error');
+    }
+}
+
+// Hook up context menu to note list
+document.addEventListener('DOMContentLoaded', function() {
+    const nodesList = document.getElementById('nodesList');
+    if (nodesList) {
+        nodesList.addEventListener('contextmenu', function(e) {
+            const noteEl = e.target.closest('[onclick*="selectNode"]');
+            if (noteEl) {
+                const nodeId = noteEl.getAttribute('onclick').match(/'([^']+)'/)[1];
+                showContextMenu(e, nodeId);
+            }
+        });
     }
 });
