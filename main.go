@@ -1,21 +1,15 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
-	"crypto/md5"
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -56,7 +50,19 @@ func main() {
 	case "export":
 		exportNode()
 	case "version":
-		fmt.Println("veil v0.2.0 - MVP")
+		fmt.Println("veil v1.0.0 - Complete Edition")
+		fmt.Println("Your universal content management system")
+		fmt.Println("\nBuilt-in plugins:")
+		fmt.Println("  - Git (version control)")
+		fmt.Println("  - IPFS (decentralized publishing)")
+		fmt.Println("  - Namecheap (DNS management)")
+		fmt.Println("  - Media (video/audio/image processing)")
+		fmt.Println("  - Pixospritz (game integration)")
+		fmt.Println("  - Shader (WebGL shader editor)")
+		fmt.Println("  - SVG (vector graphics editor)")
+		fmt.Println("  - Code (syntax-highlighted code snippets)")
+		fmt.Println("  - Todo (task management)")
+		fmt.Println("  - Reminder (time-based notifications)")
 	default:
 		printUsage()
 	}
@@ -110,7 +116,22 @@ func initVault() {
 	defer database.Close()
 
 	// Run migrations
-	migrationFiles, _ := fs.ReadDir(migrations, "migrations")
+	if err := applyMigrations(database); err != nil {
+		log.Printf("Warning: migrations had errors: %v", err)
+	}
+
+	fmt.Printf("✓ Initialized vault at %s\n", path)
+	fmt.Println("\nNext steps:")
+	fmt.Println("  veil serve")
+	fmt.Println("  veil gui")
+}
+
+// applyMigrations runs all migration files from embedded FS
+func applyMigrations(database *sql.DB) error {
+	migrationFiles, err := fs.ReadDir(migrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to read migrations: %v", err)
+	}
 
 	// Sort migration files by name to ensure proper order
 	sort.Slice(migrationFiles, func(i, j int) bool {
@@ -118,22 +139,24 @@ func initVault() {
 	})
 
 	for _, file := range migrationFiles {
-		content, _ := migrations.ReadFile("migrations/" + file.Name())
+		content, err := migrations.ReadFile("migrations/" + file.Name())
+		if err != nil {
+			log.Printf("Migration %s: read error: %v\n", file.Name(), err)
+			continue
+		}
+
 		statements := strings.Split(string(content), ";")
 		for _, stmt := range statements {
 			stmt = strings.TrimSpace(stmt)
 			if stmt != "" {
 				if _, err := database.Exec(stmt); err != nil {
-					log.Printf("Migration warning: %v\n", err)
+					log.Printf("Migration %s: %v\n", file.Name(), err)
 				}
 			}
 		}
 	}
 
-	fmt.Printf("✓ Initialized vault at %s\n", path)
-	fmt.Println("\nNext steps:")
-	fmt.Println("  veil serve")
-	fmt.Println("  veil gui")
+	return nil
 }
 
 func serve() {

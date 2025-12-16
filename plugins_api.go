@@ -212,6 +212,16 @@ func instantiatePluginBySlug(slug string) Plugin {
 		return NewMediaPlugin("./media_output")
 	case "pixospritz":
 		return NewPixospritzPlugin("http://localhost:3000")
+	case "shader":
+		return NewShaderPlugin()
+	case "svg":
+		return NewSVGPlugin()
+	case "code":
+		return NewCodePlugin()
+	case "todo":
+		return NewTodoPlugin()
+	case "reminder":
+		return NewReminderPlugin()
 	default:
 		return nil
 	}
