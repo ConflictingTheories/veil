@@ -1329,3 +1329,76 @@ json.NewEncoder(w).Encode(map[string]interface{}{
 "version_id": newVersionID,
 })
 }
+
+// Handle media upload
+func handleMediaUploadImpl(w http.ResponseWriter, r *http.Request) {
+if r.Method != "POST" {
+w.WriteHeader(http.StatusMethodNotAllowed)
+return
+}
+
+// Parse multipart form (max 50MB)
+err := r.ParseMultipartForm(50 << 20)
+if err != nil {
+w.WriteHeader(http.StatusBadRequest)
+json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse form"})
+return
+}
+
+file, header, err := r.FormFile("file")
+if err != nil {
+w.WriteHeader(http.StatusBadRequest)
+json.NewEncoder(w).Encode(map[string]string{"error": "No file uploaded"})
+return
+}
+defer file.Close()
+
+nodeID := r.FormValue("node_id")
+
+// Create media directory
+mediaDir := "./media"
+os.MkdirAll(mediaDir, 0755)
+
+// Generate unique filename
+ext := filepath.Ext(header.Filename)
+filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+filePath := filepath.Join(mediaDir, filename)
+
+// Save file
+dst, err := os.Create(filePath)
+if err != nil {
+w.WriteHeader(http.StatusInternalServerError)
+json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
+return
+}
+defer dst.Close()
+
+_, err = io.Copy(dst, file)
+if err != nil {
+w.WriteHeader(http.StatusInternalServerError)
+json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
+return
+}
+
+// Create media record
+mediaID := fmt.Sprintf("media_%d", time.Now().UnixNano())
+now := time.Now().Unix()
+
+_, err = db.Exec(`
+INSERT INTO media (id, node_id, filename, original_filename, mime_type, file_size, storage_url, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, mediaID, nodeID, filename, header.Filename, header.Header.Get("Content-Type"), header.Size, "/media/"+filename, now)
+
+if err != nil {
+w.WriteHeader(http.StatusInternalServerError)
+json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save media record"})
+return
+}
+
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(map[string]interface{}{
+"id":  mediaID,
+"url": "/media/" + filename,
+"filename": header.Filename,
+})
+}

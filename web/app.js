@@ -1182,3 +1182,103 @@ async function saveNamecheapConfig() {
     }
 }
 
+
+// Open preview in new tab
+function openPreview() {
+    if (!currentSite || !currentNode) {
+        alert('Please select a note first');
+        return;
+    }
+    window.open(`/preview/${currentSite.id}/${currentNode.id}`, '_blank');
+}
+
+// Open media upload
+function openMediaUpload() {
+    if (!currentNode) {
+        alert('Please create or select a note first');
+        return;
+    }
+    
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*,audio/*';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('node_id', currentNode.id);
+        
+        try {
+            const response = await fetch('/api/media-upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                const editor = document.getElementById('editor');
+                const mediaMarkdown = `\n![${file.name}](${data.url})\n`;
+                editor.value += mediaMarkdown;
+                editor.dispatchEvent(new Event('input'));
+                showToast('Media uploaded successfully');
+            } else {
+                showToast('Upload failed', 'error');
+            }
+        } catch (err) {
+            console.error('Upload error:', err);
+            showToast('Upload error', 'error');
+        }
+    };
+    input.click();
+}
+
+// Show toast notification
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white ${type === 'error' ? 'bg-red-600' : 'bg-green-600'} z-50`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// Format text
+function formatText(format) {
+    const editor = document.getElementById('editor');
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = editor.value.substring(start, end);
+    
+    let formatted = '';
+    switch(format) {
+        case 'bold':
+            formatted = `**${selectedText}**`;
+            break;
+        case 'italic':
+            formatted = `*${selectedText}*`;
+            break;
+        case 'code':
+            formatted = `\`${selectedText}\``;
+            break;
+    }
+    
+    editor.value = editor.value.substring(0, start) + formatted + editor.value.substring(end);
+    editor.focus();
+    editor.setSelectionRange(start + formatted.length, start + formatted.length);
+    editor.dispatchEvent(new Event('input'));
+}
+
+// Hook up toolbar buttons
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('boldBtn')?.addEventListener('click', () => formatText('bold'));
+    document.getElementById('italicBtn')?.addEventListener('click', () => formatText('italic'));
+    document.getElementById('codeBtn')?.addEventListener('click', () => formatText('code'));
+    document.getElementById('linkBtn')?.addEventListener('click', () => openModal('linkModal'));
+    document.getElementById('tagsBtn')?.addEventListener('click', () => openModal('tagsModal'));
+    document.getElementById('mediaBtn')?.addEventListener('click', () => openMediaUpload());
+    document.getElementById('versionsBtn')?.addEventListener('click', () => openModal('versionsModal'));
+    document.getElementById('publishBtn')?.addEventListener('click', () => openModal('publishModal'));
+    document.getElementById('saveBtn')?.addEventListener('click', () => saveCurrentNode());
+});
+
