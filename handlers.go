@@ -538,7 +538,11 @@ func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"id": mediaID, "checksum": hashStr, "storage_url": fpath})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":       mediaID,
+		"url":      "/media/" + filename,
+		"filename": handler.Filename,
+	})
 }
 
 func handleMedia(w http.ResponseWriter, r *http.Request) {
@@ -859,7 +863,7 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 		} else if len(parts) == 6 {
 			// /api/sites/site_123/nodes/node_456 (GET single node, PUT update, DELETE)
 			nodeID := parts[5]
-			
+
 			if r.Method == "GET" {
 				// Get single node
 				var node Node
@@ -871,13 +875,13 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 					WHERE id = ? AND site_id = ? AND deleted_at IS NULL
 				`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path,
 					&node.Title, &node.Content, &node.Slug, &node.MimeType, &created, &modified)
-				
+
 				if err != nil {
 					w.WriteHeader(http.StatusNotFound)
 					json.NewEncoder(w).Encode(map[string]string{"error": "node not found"})
 					return
 				}
-				
+
 				node.CreatedAt = time.Unix(created, 0)
 				node.ModifiedAt = time.Unix(modified, 0)
 				node.SiteID = siteID
@@ -887,30 +891,30 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 				var node Node
 				json.NewDecoder(r.Body).Decode(&node)
 				now := time.Now().Unix()
-				
+
 				_, err := db.Exec(`
 					UPDATE nodes SET title = ?, content = ?, modified_at = ?
 					WHERE id = ? AND site_id = ?
 				`, node.Title, node.Content, now, nodeID, siteID)
-				
+
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 					return
 				}
-				
+
 				// Create new version
 				var versionNumber int
 				db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
 				versionNumber++
-				
+
 				versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
 				db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
 				db.Exec(`
 					INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`, versionID, nodeID, versionNumber, node.Content, node.Title, "draft", now, now, 1)
-				
+
 				node.ID = nodeID
 				node.SiteID = siteID
 				node.ModifiedAt = time.Unix(now, 0)
@@ -1075,92 +1079,92 @@ func handleNodeTagsNested(w http.ResponseWriter, r *http.Request, siteID, nodeID
 
 // Handle node media for a specific site/node
 func handleNodeMedia(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
-w.Header().Set("Content-Type", "application/json")
-// TODO: Implement media handling for nodes
-json.NewEncoder(w).Encode(map[string]interface{}{
-"node_id": nodeID,
-"site_id": siteID,
-"media": []interface{}{},
-})
+	w.Header().Set("Content-Type", "application/json")
+	// TODO: Implement media handling for nodes
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id": nodeID,
+		"site_id": siteID,
+		"media":   []interface{}{},
+	})
 }
 
-// Handle node backlinks for a specific site/node  
+// Handle node backlinks for a specific site/node
 func handleNodeBacklinks(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
-w.Header().Set("Content-Type", "application/json")
-rows, err := db.Query(`
+	w.Header().Set("Content-Type", "application/json")
+	rows, err := db.Query(`
 SELECT DISTINCT n.id, n.title, n.type, n.path
 FROM nodes n
 INNER JOIN node_references nr ON n.id = nr.source_node_id
 WHERE nr.target_node_id = ? AND n.deleted_at IS NULL
 `, nodeID)
 
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-return
-}
-defer rows.Close()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
 
-var backlinks []map[string]interface{}
-for rows.Next() {
-var id, title, nodeType, path string
-rows.Scan(&id, &title, &nodeType, &path)
-backlinks = append(backlinks, map[string]interface{}{
-"id": id,
-"title": title,
-"type": nodeType,
-"path": path,
-})
-}
+	var backlinks []map[string]interface{}
+	for rows.Next() {
+		var id, title, nodeType, path string
+		rows.Scan(&id, &title, &nodeType, &path)
+		backlinks = append(backlinks, map[string]interface{}{
+			"id":    id,
+			"title": title,
+			"type":  nodeType,
+			"path":  path,
+		})
+	}
 
-json.NewEncoder(w).Encode(map[string]interface{}{
-"node_id": nodeID,
-"backlinks": backlinks,
-})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":   nodeID,
+		"backlinks": backlinks,
+	})
 }
 
 // Handle node references (forward links) for a specific site/node
 func handleNodeReferences(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
-w.Header().Set("Content-Type", "application/json")
-rows, err := db.Query(`
+	w.Header().Set("Content-Type", "application/json")
+	rows, err := db.Query(`
 SELECT DISTINCT n.id, n.title, n.type, n.path, nr.link_type, nr.link_text
 FROM nodes n
 INNER JOIN node_references nr ON n.id = nr.target_node_id
 WHERE nr.source_node_id = ? AND n.deleted_at IS NULL
 `, nodeID)
 
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-return
-}
-defer rows.Close()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
 
-var references []map[string]interface{}
-for rows.Next() {
-var id, title, nodeType, path, linkType, linkText string
-rows.Scan(&id, &title, &nodeType, &path, &linkType, &linkText)
-references = append(references, map[string]interface{}{
-"id": id,
-"title": title,
-"type": nodeType,
-"path": path,
-"link_type": linkType,
-"link_text": linkText,
-})
-}
+	var references []map[string]interface{}
+	for rows.Next() {
+		var id, title, nodeType, path, linkType, linkText string
+		rows.Scan(&id, &title, &nodeType, &path, &linkType, &linkText)
+		references = append(references, map[string]interface{}{
+			"id":        id,
+			"title":     title,
+			"type":      nodeType,
+			"path":      path,
+			"link_type": linkType,
+			"link_text": linkText,
+		})
+	}
 
-json.NewEncoder(w).Encode(map[string]interface{}{
-"node_id": nodeID,
-"references": references,
-})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":    nodeID,
+		"references": references,
+	})
 }
 
 // Handle site nodes listing
 func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
-w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-rows, err := db.Query(`
+	rows, err := db.Query(`
 SELECT id, type, COALESCE(parent_id, ''), path, title, content, 
        COALESCE(slug, ''), mime_type, created_at, modified_at
 FROM nodes 
@@ -1168,70 +1172,70 @@ WHERE site_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC
 `, siteID)
 
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-return
-}
-defer rows.Close()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
 
-var nodes []Node
-for rows.Next() {
-var node Node
-var created, modified int64
-err := rows.Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title,
-&node.Content, &node.Slug, &node.MimeType, &created, &modified)
-if err != nil {
-continue
-}
-node.CreatedAt = time.Unix(created, 0)
-node.ModifiedAt = time.Unix(modified, 0)
-nodes = append(nodes, node)
-}
+	var nodes []Node
+	for rows.Next() {
+		var node Node
+		var created, modified int64
+		err := rows.Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title,
+			&node.Content, &node.Slug, &node.MimeType, &created, &modified)
+		if err != nil {
+			continue
+		}
+		node.CreatedAt = time.Unix(created, 0)
+		node.ModifiedAt = time.Unix(modified, 0)
+		nodes = append(nodes, node)
+	}
 
-json.NewEncoder(w).Encode(map[string]interface{}{
-"site_id": siteID,
-"nodes": nodes,
-})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"site_id": siteID,
+		"nodes":   nodes,
+	})
 }
 
 // Handle preview route - renders node as HTML
 func handlePreview(w http.ResponseWriter, r *http.Request) {
-// Extract path like /preview/site_123/node_456
-parts := strings.Split(r.URL.Path, "/")
-if len(parts) < 4 {
-w.WriteHeader(http.StatusBadRequest)
-w.Write([]byte("Invalid preview URL"))
-return
-}
+	// Extract path like /preview/site_123/node_456
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid preview URL"))
+		return
+	}
 
-siteID := parts[2]
-nodeID := parts[3]
+	siteID := parts[2]
+	nodeID := parts[3]
 
-// Get node
-var node Node
-var created, modified int64
-err := db.QueryRow(`
+	// Get node
+	var node Node
+	var created, modified int64
+	err := db.QueryRow(`
 SELECT id, type, title, content, created_at, modified_at
 FROM nodes
 WHERE id = ? AND site_id = ? AND deleted_at IS NULL
 `, nodeID, siteID).Scan(&node.ID, &node.Type, &node.Title, &node.Content, &created, &modified)
 
-if err != nil {
-w.WriteHeader(http.StatusNotFound)
-w.Write([]byte("Node not found"))
-return
-}
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Node not found"))
+		return
+	}
 
-node.CreatedAt = time.Unix(created, 0)
-node.ModifiedAt = time.Unix(modified, 0)
+	node.CreatedAt = time.Unix(created, 0)
+	node.ModifiedAt = time.Unix(modified, 0)
 
-// Get site
-var siteName string
-db.QueryRow(`SELECT name FROM sites WHERE id = ?`, siteID).Scan(&siteName)
+	// Get site
+	var siteName string
+	db.QueryRow(`SELECT name FROM sites WHERE id = ?`, siteID).Scan(&siteName)
 
-// Render HTML
-html := fmt.Sprintf(`<!DOCTYPE html>
+	// Render HTML
+	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -1273,132 +1277,132 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 </body>
 </html>`, node.Title, siteName, node.Title, siteName, node.CreatedAt.Format("January 2, 2006"), markdownToHTML(node.Content))
 
-w.Header().Set("Content-Type", "text/html; charset=utf-8")
-w.Write([]byte(html))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(html))
 }
 
 // Handle version rollback
 func handleVersionRollback(w http.ResponseWriter, r *http.Request, siteID, nodeID, versionID string) {
-w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-if r.Method != "POST" {
-w.WriteHeader(http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 
-// Get the version content
-var content, title string
-err := db.QueryRow(`
+	// Get the version content
+	var content, title string
+	err := db.QueryRow(`
 SELECT content, title FROM versions WHERE id = ? AND node_id = ?
 `, versionID, nodeID).Scan(&content, &title)
 
-if err != nil {
-w.WriteHeader(http.StatusNotFound)
-json.NewEncoder(w).Encode(map[string]string{"error": "version not found"})
-return
-}
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "version not found"})
+		return
+	}
 
-now := time.Now().Unix()
+	now := time.Now().Unix()
 
-// Update node with version content
-_, err = db.Exec(`
+	// Update node with version content
+	_, err = db.Exec(`
 UPDATE nodes SET content = ?, title = ?, modified_at = ?
 WHERE id = ? AND site_id = ?
 `, content, title, now, nodeID, siteID)
 
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-return
-}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
 
-// Create new version from rollback
-var versionNumber int
-db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
-versionNumber++
+	// Create new version from rollback
+	var versionNumber int
+	db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
+	versionNumber++
 
-newVersionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
-db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
-db.Exec(`
+	newVersionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
+	db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
+	db.Exec(`
 INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `, newVersionID, nodeID, versionNumber, content, title, "draft", now, now, 1)
 
-json.NewEncoder(w).Encode(map[string]interface{}{
-"status": "rolled_back",
-"version_id": newVersionID,
-})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "rolled_back",
+		"version_id": newVersionID,
+	})
 }
 
 // Handle media upload
 func handleMediaUploadImpl(w http.ResponseWriter, r *http.Request) {
-if r.Method != "POST" {
-w.WriteHeader(http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 
-// Parse multipart form (max 50MB)
-err := r.ParseMultipartForm(50 << 20)
-if err != nil {
-w.WriteHeader(http.StatusBadRequest)
-json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse form"})
-return
-}
+	// Parse multipart form (max 50MB)
+	err := r.ParseMultipartForm(50 << 20)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse form"})
+		return
+	}
 
-file, header, err := r.FormFile("file")
-if err != nil {
-w.WriteHeader(http.StatusBadRequest)
-json.NewEncoder(w).Encode(map[string]string{"error": "No file uploaded"})
-return
-}
-defer file.Close()
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "No file uploaded"})
+		return
+	}
+	defer file.Close()
 
-nodeID := r.FormValue("node_id")
+	nodeID := r.FormValue("node_id")
 
-// Create media directory
-mediaDir := "./media"
-os.MkdirAll(mediaDir, 0755)
+	// Create media directory
+	mediaDir := "./media"
+	os.MkdirAll(mediaDir, 0755)
 
-// Generate unique filename
-ext := filepath.Ext(header.Filename)
-filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
-filePath := filepath.Join(mediaDir, filename)
+	// Generate unique filename
+	ext := filepath.Ext(header.Filename)
+	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	filePath := filepath.Join(mediaDir, filename)
 
-// Save file
-dst, err := os.Create(filePath)
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
-return
-}
-defer dst.Close()
+	// Save file
+	dst, err := os.Create(filePath)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
+		return
+	}
+	defer dst.Close()
 
-_, err = io.Copy(dst, file)
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
-return
-}
+	_, err = io.Copy(dst, file)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
+		return
+	}
 
-// Create media record
-mediaID := fmt.Sprintf("media_%d", time.Now().UnixNano())
-now := time.Now().Unix()
+	// Create media record
+	mediaID := fmt.Sprintf("media_%d", time.Now().UnixNano())
+	now := time.Now().Unix()
 
-_, err = db.Exec(`
+	_, err = db.Exec(`
 INSERT INTO media (id, node_id, filename, original_filename, mime_type, file_size, storage_url, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `, mediaID, nodeID, filename, header.Filename, header.Header.Get("Content-Type"), header.Size, "/media/"+filename, now)
 
-if err != nil {
-w.WriteHeader(http.StatusInternalServerError)
-json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save media record"})
-return
-}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save media record"})
+		return
+	}
 
-w.Header().Set("Content-Type", "application/json")
-json.NewEncoder(w).Encode(map[string]interface{}{
-"id":  mediaID,
-"url": "/media/" + filename,
-"filename": header.Filename,
-})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":       mediaID,
+		"url":      "/media/" + filename,
+		"filename": header.Filename,
+	})
 }

@@ -1024,9 +1024,14 @@ function selectLinkNode(nodeId, title) {
 async function insertLink() {
     const type = document.getElementById('linkType').value;
     const linkText = document.getElementById('linkTextInput').value;
-    const editor = document.getElementById('noteContent');
+    const editor = document.getElementById('noteContent') || document.getElementById('editor');
     
-    if (!editor || !linkText) {
+    if (!editor) {
+        alert('Editor not found');
+        return;
+    }
+    
+    if (!linkText || linkText.trim() === '') {
         alert('Please provide link text');
         return;
     }
@@ -1037,9 +1042,9 @@ async function insertLink() {
         linkUrl = `veil://note/${selectedLinkNode.id}`;
         
         // Create reference in database
-        if (currentNode) {
+        if (currentNode && currentSite) {
             try {
-                await fetch(`/api/sites/${currentSite}/nodes/${currentNode}/references`, {
+                await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/references`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1054,38 +1059,35 @@ async function insertLink() {
         }
     } else if (type === 'external') {
         linkUrl = document.getElementById('externalUrlInput').value;
-        if (!linkUrl.startsWith('http')) {
+        if (!linkUrl || !linkUrl.startsWith('http')) {
             alert('External URL must start with http:// or https://');
             return;
         }
     } else if (type === 'veil') {
         linkUrl = document.getElementById('veilUriInput').value;
-        if (!linkUrl.startsWith('veil://')) {
+        if (!linkUrl || !linkUrl.startsWith('veil://')) {
             alert('Veil URI must start with veil://');
             return;
         }
+    } else {
+        alert('Please select a note to link to');
+        return;
     }
     
     const markdown = `[${linkText}](${linkUrl})`;
     const start = editor.selectionStart;
     const end = editor.selectionEnd;
-    const text = editor.value;
-    editor.value = text.substring(0, start) + markdown + text.substring(end);
-    editor.selectionStart = editor.selectionEnd = start + markdown.length;
+    
+    editor.value = editor.value.substring(0, start) + markdown + editor.value.substring(end);
     editor.focus();
+    editor.setSelectionRange(start + markdown.length, start + markdown.length);
+    editor.dispatchEvent(new Event('input'));
     
     closeModal('linkModal');
     selectedLinkNode = null;
-    document.getElementById('linkSearchInput').value = '';
     document.getElementById('linkTextInput').value = '';
-    document.getElementById('externalUrlInput').value = '';
-    document.getElementById('veilUriInput').value = '';
-    document.getElementById('linkType').value = 'internal';
-    
-    // Reload references if viewing current node
-    if (currentNode) {
-        loadReferences();
-    }
+    document.getElementById('linkSearchInput').value = '';
+    document.getElementById('linkSearchResults').innerHTML = '';
 }
 
 // ====== ORIGINAL GIT CONFIG FUNCTION ======
@@ -1282,3 +1284,11 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('saveBtn')?.addEventListener('click', () => saveCurrentNode());
 });
 
+
+// Hook up preview button
+document.addEventListener('DOMContentLoaded', function() {
+    const previewBtn = document.getElementById('previewBtn');
+    if (previewBtn) {
+        previewBtn.addEventListener('click', openPreview);
+    }
+});

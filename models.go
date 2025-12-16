@@ -94,7 +94,7 @@ type Tag struct {
 type Citation struct {
 	ID             string `json:"id"`
 	NodeID         string `json:"node_id"`
-	CitationKey    string `citation_key"`
+	CitationKey    string `json:"citation_key"`
 	Authors        string `json:"authors"`
 	Title          string `json:"title"`
 	Year           int    `json:"year"`

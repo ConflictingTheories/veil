@@ -249,6 +249,9 @@ func setupRoutes() *http.ServeMux {
 	webFS, _ := fs.Sub(webUI, "web")
 	mux.Handle("/", http.FileServer(http.FS(webFS)))
 
+	// Media files
+	mux.Handle("/media/", http.StripPrefix("/media/", http.FileServer(http.Dir("./media"))))
+
 	// Core node APIs
 	mux.HandleFunc("/api/nodes", handleNodes)
 	mux.HandleFunc("/api/node/", handleNode)
@@ -303,7 +306,7 @@ func setupRoutes() *http.ServeMux {
 	// Sites/Projects
 	mux.HandleFunc("/api/sites", handleSites)
 	mux.HandleFunc("/api/sites/", handleSitesDetail)
-	
+
 	// Preview route
 	mux.HandleFunc("/preview/", handlePreview)
 
