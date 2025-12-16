@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Veil</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="titlebar">
+        <div class="titlebar-left">
+            <div class="titlebar-logo">VEIL</div>
+            <div class="titlebar-path">~/veil.db</div>
+        </div>
+    </div>
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">WORKSPACE</div>
+                <div class="sidebar-actions">
+                    <button class="icon-btn" id="newFileBtn">+</button>
+                </div>
+            </div>
+            <div class="tree-view" id="treeView"></div>
+        </div>
+        <div class="editor-container">
+            <div class="tabs" id="tabs"></div>
+            <div class="editor">
+                <div class="editor-left">
+                    <div class="editor-toolbar">
+                        <button class="toolbar-btn" id="togglePreview">Preview</button>
+                    </div>
+                    <textarea class="editor-text" id="editor" placeholder="Start writing..."></textarea>
+                </div>
+                <div class="preview-pane" id="preview"></div>
+            </div>
+        </div>
+    </div>
+    <div class="statusbar">
+        <div class="statusbar-left">
+            <div class="status-item">
+                <span class="status-dot"></span><span id="syncText">Ready</span>
+            </div>
+        </div>
+        <div class="statusbar-right">
+            <div class="status-item" id="wordCount">0 words</div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
