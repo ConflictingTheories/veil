@@ -991,7 +991,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             try {
                 const response = await fetch(`/api/sites/${currentSite}/nodes`);
-                const nodes = await response.json();
+                const data = await response.json();
+                const nodes = data.nodes || [];
                 const filtered = nodes.filter(n => 
                     n.title.toLowerCase().includes(query) || 
                     (n.content && n.content.toLowerCase().includes(query))

@@ -303,6 +303,9 @@ func setupRoutes() *http.ServeMux {
 	// Sites/Projects
 	mux.HandleFunc("/api/sites", handleSites)
 	mux.HandleFunc("/api/sites/", handleSitesDetail)
+	
+	// Preview route
+	mux.HandleFunc("/preview/", handlePreview)
 
 	// Plugin APIs (NEW)
 	mux.HandleFunc("/api/plugins", handlePluginsList)

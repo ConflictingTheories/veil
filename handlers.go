@@ -820,7 +820,112 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 
 	// Route to appropriate handler based on path structure
 	if len(parts) > 4 && parts[4] == "nodes" {
-		if len(parts) > 6 {
+		if len(parts) == 5 {
+			// /api/sites/site_123/nodes (GET list or POST create)
+			if r.Method == "POST" {
+				// Create node in site
+				var node Node
+				json.NewDecoder(r.Body).Decode(&node)
+				node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
+				node.SiteID = siteID
+				now := time.Now().Unix()
+
+				_, err := db.Exec(`
+					INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, site_id, created_at, modified_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`, node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, node.SiteID, now, now)
+
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+
+				// Create initial version
+				versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
+				db.Exec(`
+					INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`, versionID, node.ID, 1, node.Content, node.Title, "draft", now, now, 1)
+
+				node.CreatedAt = time.Unix(now, 0)
+				node.ModifiedAt = time.Unix(now, 0)
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(node)
+			} else {
+				// List nodes in site
+				handleSiteNodes(w, r, siteID)
+			}
+		} else if len(parts) == 6 {
+			// /api/sites/site_123/nodes/node_456 (GET single node, PUT update, DELETE)
+			nodeID := parts[5]
+			
+			if r.Method == "GET" {
+				// Get single node
+				var node Node
+				var created, modified int64
+				err := db.QueryRow(`
+					SELECT id, type, COALESCE(parent_id, ''), path, title, content,
+					       COALESCE(slug, ''), mime_type, created_at, modified_at
+					FROM nodes
+					WHERE id = ? AND site_id = ? AND deleted_at IS NULL
+				`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path,
+					&node.Title, &node.Content, &node.Slug, &node.MimeType, &created, &modified)
+				
+				if err != nil {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(map[string]string{"error": "node not found"})
+					return
+				}
+				
+				node.CreatedAt = time.Unix(created, 0)
+				node.ModifiedAt = time.Unix(modified, 0)
+				node.SiteID = siteID
+				json.NewEncoder(w).Encode(node)
+			} else if r.Method == "PUT" {
+				// Update node
+				var node Node
+				json.NewDecoder(r.Body).Decode(&node)
+				now := time.Now().Unix()
+				
+				_, err := db.Exec(`
+					UPDATE nodes SET title = ?, content = ?, modified_at = ?
+					WHERE id = ? AND site_id = ?
+				`, node.Title, node.Content, now, nodeID, siteID)
+				
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+				
+				// Create new version
+				var versionNumber int
+				db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
+				versionNumber++
+				
+				versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
+				db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
+				db.Exec(`
+					INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`, versionID, nodeID, versionNumber, node.Content, node.Title, "draft", now, now, 1)
+				
+				node.ID = nodeID
+				node.SiteID = siteID
+				node.ModifiedAt = time.Unix(now, 0)
+				json.NewEncoder(w).Encode(node)
+			} else if r.Method == "DELETE" {
+				now := time.Now().Unix()
+				_, err := db.Exec(`UPDATE nodes SET deleted_at = ? WHERE id = ? AND site_id = ?`, now, nodeID, siteID)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}
+		} else if len(parts) > 6 {
 			// Sub-resources: /api/sites/site_123/nodes/node_456/versions or /publish etc
 			nodeID := parts[5]
 			action := parts[6]
@@ -841,9 +946,6 @@ func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
-		} else {
-			// /api/sites/site_123/nodes or /api/sites/site_123/nodes/node_456
-			handleSiteNodes(w, r, siteID)
 		}
 	}
 }
@@ -1085,5 +1187,140 @@ nodes = append(nodes, node)
 json.NewEncoder(w).Encode(map[string]interface{}{
 "site_id": siteID,
 "nodes": nodes,
+})
+}
+
+// Handle preview route - renders node as HTML
+func handlePreview(w http.ResponseWriter, r *http.Request) {
+// Extract path like /preview/site_123/node_456
+parts := strings.Split(r.URL.Path, "/")
+if len(parts) < 4 {
+w.WriteHeader(http.StatusBadRequest)
+w.Write([]byte("Invalid preview URL"))
+return
+}
+
+siteID := parts[2]
+nodeID := parts[3]
+
+// Get node
+var node Node
+var created, modified int64
+err := db.QueryRow(`
+SELECT id, type, title, content, created_at, modified_at
+FROM nodes
+WHERE id = ? AND site_id = ? AND deleted_at IS NULL
+`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.Title, &node.Content, &created, &modified)
+
+if err != nil {
+w.WriteHeader(http.StatusNotFound)
+w.Write([]byte("Node not found"))
+return
+}
+
+node.CreatedAt = time.Unix(created, 0)
+node.ModifiedAt = time.Unix(modified, 0)
+
+// Get site
+var siteName string
+db.QueryRow(`SELECT name FROM sites WHERE id = ?`, siteID).Scan(&siteName)
+
+// Render HTML
+html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%s - %s</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+.content { max-width: 800px; margin: 0 auto; padding: 2rem; }
+.content h1 { font-size: 2.5rem; font-weight: bold; margin-bottom: 1rem; }
+.content h2 { font-size: 2rem; font-weight: bold; margin-top: 2rem; margin-bottom: 1rem; }
+.content h3 { font-size: 1.5rem; font-weight: bold; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+.content p { margin-bottom: 1rem; line-height: 1.7; }
+.content code { background: #f3f4f6; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; }
+.content pre { background: #1f2937; color: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
+.content ul, .content ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+.content li { margin-bottom: 0.5rem; }
+.content a { color: #4f46e5; text-decoration: underline; }
+</style>
+</head>
+<body class="bg-slate-50">
+<div class="content">
+<div class="text-sm text-slate-500 mb-4">
+<a href="/" class="hover:text-slate-700">← Back to Editor</a>
+</div>
+<article class="bg-white rounded-lg shadow-sm p-8">
+<header class="mb-8 border-b pb-4">
+<h1 class="text-slate-900">%s</h1>
+<div class="text-sm text-slate-500 mt-2">
+<span>%s</span> • 
+<span>%s</span>
+</div>
+</header>
+<div class="content prose prose-slate">
+%s
+</div>
+</article>
+</div>
+</body>
+</html>`, node.Title, siteName, node.Title, siteName, node.CreatedAt.Format("January 2, 2006"), markdownToHTML(node.Content))
+
+w.Header().Set("Content-Type", "text/html; charset=utf-8")
+w.Write([]byte(html))
+}
+
+// Handle version rollback
+func handleVersionRollback(w http.ResponseWriter, r *http.Request, siteID, nodeID, versionID string) {
+w.Header().Set("Content-Type", "application/json")
+
+if r.Method != "POST" {
+w.WriteHeader(http.StatusMethodNotAllowed)
+return
+}
+
+// Get the version content
+var content, title string
+err := db.QueryRow(`
+SELECT content, title FROM versions WHERE id = ? AND node_id = ?
+`, versionID, nodeID).Scan(&content, &title)
+
+if err != nil {
+w.WriteHeader(http.StatusNotFound)
+json.NewEncoder(w).Encode(map[string]string{"error": "version not found"})
+return
+}
+
+now := time.Now().Unix()
+
+// Update node with version content
+_, err = db.Exec(`
+UPDATE nodes SET content = ?, title = ?, modified_at = ?
+WHERE id = ? AND site_id = ?
+`, content, title, now, nodeID, siteID)
+
+if err != nil {
+w.WriteHeader(http.StatusInternalServerError)
+json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+return
+}
+
+// Create new version from rollback
+var versionNumber int
+db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
+versionNumber++
+
+newVersionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
+db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
+db.Exec(`
+INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, newVersionID, nodeID, versionNumber, content, title, "draft", now, now, 1)
+
+json.NewEncoder(w).Encode(map[string]interface{}{
+"status": "rolled_back",
+"version_id": newVersionID,
 })
 }
