@@ -35,18 +35,24 @@ var dbPath string
 
 // === Types ===
 type Node struct {
-	ID         string    `json:"id"`
-	Type       string    `json:"type"`
-	ParentID   string    `json:"parent_id,omitempty"`
-	Path       string    `json:"path"`
-	Title      string    `json:"title"`
-	Content    string    `json:"content"`
-	MimeType   string    `json:"mime_type"`
-	CreatedAt  time.Time `json:"created_at"`
-	ModifiedAt time.Time `json:"modified_at"`
-	Tags       []string  `json:"tags,omitempty"`
-	References []string  `json:"references,omitempty"`
-	Visibility string    `json:"visibility,omitempty"`
+	ID           string    `json:"id"`
+	Type         string    `json:"type"`
+	ParentID     string    `json:"parent_id,omitempty"`
+	Path         string    `json:"path"`
+	Title        string    `json:"title"`
+	Content      string    `json:"content"`
+	Slug         string    `json:"slug,omitempty"`
+	CanonicalURI string    `json:"canonical_uri,omitempty"`
+	Body         string    `json:"body,omitempty"`     // JSON structured body
+	Metadata     string    `json:"metadata,omitempty"` // JSON metadata
+	MimeType     string    `json:"mime_type"`
+	CreatedAt    time.Time `json:"created_at"`
+	ModifiedAt   time.Time `json:"modified_at"`
+	Tags         []string  `json:"tags,omitempty"`
+	References   []string  `json:"references,omitempty"`
+	Visibility   string    `json:"visibility,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	SiteID       string    `json:"site_id,omitempty"`
 }
 
 type Version struct {
@@ -72,13 +78,16 @@ type BlogPost struct {
 }
 
 type MediaFile struct {
-	ID               string `json:"id"`
-	NodeID           string `json:"node_id"`
-	Filename         string `json:"filename"`
-	OriginalFilename string `json:"original_filename"`
-	MimeType         string `json:"mime_type"`
-	FileSize         int64  `json:"file_size"`
-	Hash             string `json:"hash"`
+	ID               string    `json:"id"`
+	NodeID           string    `json:"node_id"`
+	Filename         string    `json:"filename"`
+	OriginalFilename string    `json:"original_filename"`
+	MimeType         string    `json:"mime_type"`
+	FileSize         int64     `json:"file_size"`
+	Checksum         string    `json:"checksum"`
+	StorageURL       string    `json:"storage_url"`
+	UploadedBy       string    `json:"uploaded_by"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type Reference struct {
@@ -116,6 +125,24 @@ type Site struct {
 	Type        string    `json:"type"` // project, portfolio, blog, etc
 	CreatedAt   time.Time `json:"created_at"`
 	ModifiedAt  time.Time `json:"modified_at"`
+}
+
+type NodeURI struct {
+	ID        string    `json:"id"`
+	NodeID    string    `json:"node_id"`
+	URI       string    `json:"uri"`
+	IsPrimary bool      `json:"is_primary"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type PluginManifest struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	Manifest  string    `json:"manifest"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func main() {
@@ -246,6 +273,8 @@ func serve() {
 	// Initialize plugin systems
 	initPluginRegistry()
 	initCredentialManager()
+	// Load enabled plugins from DB and register them at runtime
+	loadEnabledPluginsFromDB()
 
 	mux := setupRoutes()
 	addr := ":" + port
@@ -271,6 +300,7 @@ func gui() {
 	// Initialize plugin systems
 	initPluginRegistry()
 	initCredentialManager()
+	loadEnabledPluginsFromDB()
 
 	mux := setupRoutes()
 	go func() {
@@ -363,6 +393,8 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/plugin-execute", handlePluginExecute)
 	mux.HandleFunc("/api/credentials", handleCredentialsAPI)
 	mux.HandleFunc("/api/publish-job", handlePublishJob)
+	mux.HandleFunc("/api/plugins-registry", handlePluginsRegistry)
+	mux.HandleFunc("/api/node-uris", handleNodeURIs)
 
 	return mux
 }
@@ -619,11 +651,173 @@ func handleResolveLink(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	linkText := r.URL.Query().Get("text")
 
-	var node Node
-	db.QueryRow(`SELECT id, path FROM nodes WHERE path LIKE ? OR title LIKE ?`, "%"+linkText+"%", "%"+linkText+"%").
-		Scan(&node.ID, &node.Path)
+	// Try exact URI match in node_uris
+	var uri NodeURI
+	err := db.QueryRow(`SELECT id, node_id, uri, is_primary, created_at FROM node_uris WHERE uri = ?`, linkText).
+		Scan(&uri.ID, &uri.NodeID, &uri.URI, &uri.IsPrimary, &uri.CreatedAt)
+	if err == nil {
+		var node Node
+		db.QueryRow(`SELECT id, path, title FROM nodes WHERE id = ?`, uri.NodeID).Scan(&node.ID, &node.Path, &node.Title)
+		json.NewEncoder(w).Encode(node)
+		return
+	}
 
+	// Fallback: search by canonical_uri or partial path/title
+	var node Node
+	db.QueryRow(`SELECT id, path, title FROM nodes WHERE canonical_uri = ? OR path LIKE ? OR title LIKE ?`, linkText, "%"+linkText+"%", "%"+linkText+"%").
+		Scan(&node.ID, &node.Path, &node.Title)
 	json.NewEncoder(w).Encode(node)
+}
+
+// === API Handlers - Node URIs ===
+func handleNodeURIs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "GET" {
+		nodeID := r.URL.Query().Get("node_id")
+		rows, _ := db.Query(`SELECT id, node_id, uri, is_primary, created_at FROM node_uris WHERE node_id = ?`, nodeID)
+		defer rows.Close()
+
+		var uris []NodeURI
+		for rows.Next() {
+			var u NodeURI
+			var createdAt int64
+			rows.Scan(&u.ID, &u.NodeID, &u.URI, &u.IsPrimary, &createdAt)
+			u.CreatedAt = time.Unix(createdAt, 0)
+			uris = append(uris, u)
+		}
+		json.NewEncoder(w).Encode(uris)
+		return
+	}
+
+	if r.Method == "POST" {
+		var req NodeURI
+		json.NewDecoder(r.Body).Decode(&req)
+		req.ID = fmt.Sprintf("nodeuri_%d", time.Now().UnixNano())
+		now := time.Now().Unix()
+		_, err := db.Exec(`INSERT INTO node_uris (id, node_id, uri, is_primary, created_at) VALUES (?, ?, ?, ?, ?)`, req.ID, req.NodeID, req.URI, 0, now)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(req)
+		return
+	}
+
+	if r.Method == "DELETE" {
+		id := r.URL.Query().Get("id")
+		_, err := db.Exec(`DELETE FROM node_uris WHERE id = ?`, id)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"deleted": id})
+		return
+	}
+}
+
+// === API Handlers - Plugin Registry ===
+func handlePluginsRegistry(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "GET" {
+		rows, _ := db.Query(`SELECT id, name, slug, manifest, enabled, created_at, updated_at FROM plugins_registry ORDER BY name`)
+		defer rows.Close()
+
+		var out []PluginManifest
+		for rows.Next() {
+			var p PluginManifest
+			var createdAt, updatedAt sql.NullInt64
+			var enabled int
+			rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Manifest, &enabled, &createdAt, &updatedAt)
+			p.Enabled = enabled == 1
+			if createdAt.Valid {
+				p.CreatedAt = time.Unix(createdAt.Int64, 0)
+			}
+			if updatedAt.Valid {
+				p.UpdatedAt = time.Unix(updatedAt.Int64, 0)
+			}
+			out = append(out, p)
+		}
+		json.NewEncoder(w).Encode(out)
+		return
+	}
+
+	if r.Method == "POST" {
+		var req PluginManifest
+		json.NewDecoder(r.Body).Decode(&req)
+		req.ID = fmt.Sprintf("plugin_%d", time.Now().UnixNano())
+		now := time.Now().Unix()
+		enabled := 0
+		if req.Enabled {
+			enabled = 1
+		}
+		_, err := db.Exec(`INSERT INTO plugins_registry (id, name, slug, manifest, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, req.ID, req.Name, req.Slug, req.Manifest, enabled, now, now)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(req)
+		return
+	}
+
+	if r.Method == "PUT" {
+		var req PluginManifest
+		json.NewDecoder(r.Body).Decode(&req)
+		now := time.Now().Unix()
+		enabled := 0
+		if req.Enabled {
+			enabled = 1
+		}
+		_, err := db.Exec(`UPDATE plugins_registry SET name = ?, manifest = ?, enabled = ?, updated_at = ? WHERE slug = ? OR id = ?`, req.Name, req.Manifest, enabled, now, req.Slug, req.ID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		// Runtime registration/unregistration
+		if req.Enabled {
+			p := instantiatePluginBySlug(req.Slug)
+			if p != nil {
+				var cfg map[string]interface{}
+				if req.Manifest != "" {
+					json.Unmarshal([]byte(req.Manifest), &cfg)
+				}
+				if err := p.Initialize(cfg); err != nil {
+					log.Printf("plugin init failed for %s: %v", req.Slug, err)
+				} else if err := pluginRegistry.Register(p); err != nil {
+					log.Printf("plugin register failed for %s: %v", req.Slug, err)
+				} else {
+					log.Printf("plugin %s enabled and registered", req.Slug)
+				}
+			}
+		} else {
+			// Try by slug first, then name
+			if err := pluginRegistry.Unregister(req.Slug); err != nil {
+				if req.Name != "" {
+					pluginRegistry.Unregister(req.Name)
+				}
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"updated": req.Slug})
+		return
+	}
+
+	if r.Method == "DELETE" {
+		id := r.URL.Query().Get("id")
+		_, err := db.Exec(`DELETE FROM plugins_registry WHERE id = ? OR slug = ?`, id, id)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"deleted": id})
+		return
+	}
 }
 
 // === API Handlers - Tags ===
@@ -676,12 +870,22 @@ func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	mediaID := fmt.Sprintf("media_%d", time.Now().UnixNano())
 	now := time.Now().Unix()
 
-	db.Exec(`INSERT INTO media (id, node_id, filename, original_filename, mime_type, file_size, blob_data, hash, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		mediaID, "", handler.Filename, handler.Filename, handler.Header.Get("Content-Type"),
-		buf.Len(), buf.Bytes(), hashStr, now)
+	// Ensure media dir exists and write file to disk
+	os.MkdirAll("./media", 0755)
+	filename := fmt.Sprintf("%s_%s", mediaID, handler.Filename)
+	fpath := filepath.Join("media", filename)
+	os.WriteFile(fpath, buf.Bytes(), 0644)
 
-	json.NewEncoder(w).Encode(map[string]string{"id": mediaID, "hash": hashStr})
+	_, err := db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		mediaID, handler.Filename, fpath, hashStr, handler.Header.Get("Content-Type"), buf.Len(), "", now)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"id": mediaID, "checksum": hashStr, "storage_url": fpath})
 }
 
 func handleMedia(w http.ResponseWriter, r *http.Request) {
@@ -689,8 +893,8 @@ func handleMedia(w http.ResponseWriter, r *http.Request) {
 	mediaID := r.URL.Query().Get("id")
 
 	var media MediaFile
-	db.QueryRow(`SELECT id, node_id, filename, original_filename, mime_type, file_size, hash FROM media WHERE id = ?`, mediaID).
-		Scan(&media.ID, &media.NodeID, &media.Filename, &media.OriginalFilename, &media.MimeType, &media.FileSize, &media.Hash)
+	db.QueryRow(`SELECT id, node_id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at FROM media WHERE id = ?`, mediaID).
+		Scan(&media.ID, &media.NodeID, &media.Filename, &media.StorageURL, &media.Checksum, &media.MimeType, &media.FileSize, &media.UploadedBy, &media.CreatedAt)
 
 	json.NewEncoder(w).Encode(media)
 }
@@ -699,14 +903,13 @@ func handleMediaLibrary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	userID := r.URL.Query().Get("user_id")
 
-	rows, _ := db.Query(`SELECT m.id, m.node_id, m.filename, m.mime_type, m.file_size 
-		FROM media m JOIN media_library ml ON m.id = ml.media_id WHERE ml.user_id = ?`, userID)
+	rows, _ := db.Query(`SELECT m.id, m.node_id, m.filename, m.storage_url, m.checksum, m.mime_type, m.size, m.uploaded_by FROM media m JOIN media_library ml ON m.id = ml.media_id WHERE ml.user_id = ?`, userID)
 	defer rows.Close()
 
 	var media []MediaFile
 	for rows.Next() {
 		var m MediaFile
-		rows.Scan(&m.ID, &m.NodeID, &m.Filename, &m.MimeType, &m.FileSize)
+		rows.Scan(&m.ID, &m.NodeID, &m.Filename, &m.StorageURL, &m.Checksum, &m.MimeType, &m.FileSize, &m.UploadedBy)
 		media = append(media, m)
 	}
 	json.NewEncoder(w).Encode(media)
@@ -900,6 +1103,25 @@ func handleSites(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(site)
+	} else if r.Method == "PUT" {
+		var s Site
+		json.NewDecoder(r.Body).Decode(&s)
+		if s.ID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "missing site id"})
+			return
+		}
+
+		now := time.Now().Unix()
+		_, err := db.Exec(`UPDATE sites SET name = ?, description = ?, type = ?, modified_at = ? WHERE id = ?`, s.Name, s.Description, s.Type, now, s.ID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		s.ModifiedAt = time.Unix(now, 0)
+		json.NewEncoder(w).Encode(s)
 	}
 }
 
@@ -935,9 +1157,9 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			var node Node
 			var createdAt, modifiedAt int64
 			err := db.QueryRow(`
-				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), created_at, modified_at
+				SELECT id, type, COALESCE(parent_id, ''), path, title, COALESCE(content, ''), COALESCE(mime_type, ''), COALESCE(slug, ''), COALESCE(canonical_uri, ''), COALESCE(body, ''), COALESCE(metadata, ''), COALESCE(status, ''), created_at, modified_at
 				FROM nodes WHERE id = ? AND site_id = ?
-			`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title, &node.Content, &node.MimeType, &createdAt, &modifiedAt)
+			`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path, &node.Title, &node.Content, &node.MimeType, &node.Slug, &node.CanonicalURI, &node.Body, &node.Metadata, &node.Status, &createdAt, &modifiedAt)
 
 			if err != nil {
 				// Debug: log more details to help diagnose why a node that should exist isn't found
@@ -975,7 +1197,7 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 			for rows.Next() {
 				var n Node
 				var createdAt, modifiedAt int64
-				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &createdAt, &modifiedAt)
+				err := rows.Scan(&n.ID, &n.Type, &n.ParentID, &n.Path, &n.Title, &n.Content, &n.MimeType, &n.Slug, &n.CanonicalURI, &n.Body, &n.Metadata, &n.Status, &createdAt, &modifiedAt)
 				if err != nil {
 					continue
 				}
@@ -1004,9 +1226,9 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 		now := time.Now().Unix()
 
 		_, err = db.Exec(`
-			INSERT INTO nodes (id, type, path, title, content, mime_type, created_at, modified_at, site_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, now, now, siteID)
+			INSERT INTO nodes (id, type, path, title, content, mime_type, slug, canonical_uri, body, metadata, status, created_at, modified_at, site_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, node.ID, node.Type, node.Path, node.Title, node.Content, node.MimeType, node.Slug, node.CanonicalURI, node.Body, node.Metadata, node.Status, now, now, siteID)
 
 		if err != nil {
 			// Convert DB-level unique constraint errors into a 409 Conflict so clients can handle them
@@ -1040,8 +1262,8 @@ func handleSiteNodes(w http.ResponseWriter, r *http.Request, siteID string) {
 
 		now := time.Now().Unix()
 		_, err := db.Exec(`
-			UPDATE nodes SET title = ?, content = ?, modified_at = ? WHERE id = ? AND site_id = ?
-		`, node.Title, node.Content, now, nodeID, siteID)
+			UPDATE nodes SET title = ?, content = ?, mime_type = ?, slug = ?, canonical_uri = ?, body = ?, metadata = ?, status = ?, modified_at = ? WHERE id = ? AND site_id = ?
+		`, node.Title, node.Content, node.MimeType, node.Slug, node.CanonicalURI, node.Body, node.Metadata, node.Status, now, nodeID, siteID)
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -1091,11 +1313,69 @@ func applyMigrations(database *sql.DB) error {
 			if stmt == "" {
 				continue
 			}
+
+			// Detect ALTER TABLE ... ADD COLUMN statements and make them idempotent
+			upper := strings.ToUpper(stmt)
+			if strings.HasPrefix(upper, "ALTER TABLE") && strings.Contains(upper, "ADD COLUMN") {
+				// Try to parse table and column name
+				re := regexp.MustCompile(`(?i)ALTER\s+TABLE\s+([` + "`" + `\w]+)\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+([\w` + "`" + `\"]+)`)
+				m := re.FindStringSubmatch(stmt)
+				table := ""
+				col := ""
+				if len(m) >= 3 {
+					table = strings.Trim(m[1], "`\"")
+					col = strings.Trim(m[2], "`\"")
+				}
+
+				if table != "" && col != "" {
+					// Check if column already exists
+					exists := false
+					rows, _ := database.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+					for rows.Next() {
+						var cid int
+						var name, ctype string
+						var notnull, dfltValue, pk interface{}
+						rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+						if name == col {
+							exists = true
+							break
+						}
+					}
+					if rows != nil {
+						rows.Close()
+					}
+
+					if exists {
+						// Column already present — skip this statement
+						continue
+					}
+
+					// Some SQLite builds reject 'IF NOT EXISTS'; try executing without it
+					execStmt := strings.Replace(stmt, "IF NOT EXISTS", "", 1)
+					execStmt = strings.TrimSpace(execStmt)
+					if _, err := database.Exec(execStmt); err != nil {
+						// Try a minimal ALTER that only sets column name and type (strip constraints like UNIQUE/REFERENCES)
+						log.Printf("Migration %s ALTER TABLE add column error (table=%s col=%s) attempting fallback: %v\n", file.Name(), table, col, err)
+						// Build a minimal ALTER statement: extract type token after column name
+						remainderRe := regexp.MustCompile(`(?i)ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+([` + "`" + `\w]+)\s+([A-Za-z0-9()]+)`)
+						m2 := remainderRe.FindStringSubmatch(stmt)
+						if len(m2) >= 3 {
+							colName := strings.Trim(m2[1], "`\"")
+							colType := m2[2]
+							fallback := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, colName, colType)
+							if _, err2 := database.Exec(fallback); err2 != nil {
+								log.Printf("Migration %s fallback ALTER failed (table=%s col=%s): %v\n", file.Name(), table, colName, err2)
+							}
+						}
+					}
+					continue
+				}
+			}
+
 			if _, err := database.Exec(stmt); err != nil {
-				// Some SQL engines or older SQLite versions may not support certain clauses
-				// (e.g., ALTER TABLE ... ADD COLUMN IF NOT EXISTS), and migrations may be re-run.
-				// Treat 'already exists' and known benign syntax errors as non-fatal.
-				if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "near \"EXISTS\": syntax error") {
+				// Ignore benign errors caused by dialect differences or missing referenced columns when re-running
+				errStr := err.Error()
+				if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "near \"EXISTS\": syntax error") || strings.Contains(errStr, "no such column") || strings.Contains(errStr, "duplicate column") {
 					// ignore
 					continue
 				}

@@ -80,6 +80,26 @@ func (pr *PluginRegistry) ListPlugins() []string {
 	return names
 }
 
+// Unregister removes a plugin by name and invokes its Shutdown method if present
+func (pr *PluginRegistry) Unregister(name string) error {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+
+	plugin, exists := pr.plugins[name]
+	if !exists {
+		return fmt.Errorf("plugin %s not registered", name)
+	}
+
+	// Attempt graceful shutdown
+	if err := plugin.Shutdown(); err != nil {
+		// Log and continue to remove it
+		fmt.Printf("plugin %s shutdown error: %v\n", name, err)
+	}
+
+	delete(pr.plugins, name)
+	return nil
+}
+
 // === Publishing Channel System ===
 
 type PublishingChannel struct {

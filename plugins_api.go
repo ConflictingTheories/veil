@@ -199,6 +199,58 @@ func handlePublishJob(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Instantiate known plugins by slug. Returns nil if the slug is unknown or instantiation fails.
+func instantiatePluginBySlug(slug string) Plugin {
+	switch slug {
+	case "git":
+		return NewGitPlugin()
+	case "ipfs":
+		return NewIPFSPlugin("http://localhost:5001")
+	case "namecheap":
+		return NewNamecheapPlugin()
+	case "media":
+		return NewMediaPlugin("./media_output")
+	case "pixospritz":
+		return NewPixospritzPlugin("http://localhost:3000")
+	default:
+		return nil
+	}
+}
+
+// Load enabled plugins from the DB and register them into the runtime registry
+func loadEnabledPluginsFromDB() {
+	rows, err := db.Query(`SELECT id, name, slug, manifest FROM plugins_registry WHERE enabled = 1`)
+	if err != nil {
+		log.Println("Failed to load enabled plugins from DB:", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name, slug, manifest string
+		rows.Scan(&id, &name, &slug, &manifest)
+		p := instantiatePluginBySlug(slug)
+		if p == nil {
+			log.Printf("No runtime plugin implementation for slug: %s\n", slug)
+			continue
+		}
+		// Attempt to initialize with manifest JSON if present
+		var cfg map[string]interface{}
+		if manifest != "" {
+			json.Unmarshal([]byte(manifest), &cfg)
+		}
+		if err := p.Initialize(cfg); err != nil {
+			log.Printf("Failed to initialize plugin %s: %v\n", slug, err)
+			continue
+		}
+		if err := pluginRegistry.Register(p); err != nil {
+			log.Printf("Failed to register plugin %s: %v\n", slug, err)
+			continue
+		}
+		log.Printf("Registered plugin from DB: %s (%s)\n", name, slug)
+	}
+}
+
 // === Processing Functions ===
 
 func processPublishJob(job PublishJob) {

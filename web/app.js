@@ -24,6 +24,10 @@ function setupEventListeners() {
     document.getElementById('newSiteBtn')?.addEventListener('click', createNewSite);
     document.getElementById('newNoteBtn')?.addEventListener('click', createNewNote);
     document.getElementById('settingsBtn')?.addEventListener('click', () => openModal('settingsModal'));
+    document.getElementById('pluginsBtn')?.addEventListener('click', async () => { openModal('pluginsModal'); await loadPlugins(); });
+    document.getElementById('openSiteEditor')?.addEventListener('click', () => { openModal('siteEditorModal'); populateSiteEditor(); });
+    document.getElementById('saveSiteBtn')?.addEventListener('click', saveSiteEdits);
+    document.getElementById('addUriBtn')?.addEventListener('click', addUriPrompt);
     document.getElementById('globalSearch')?.addEventListener('input', (e) => filterNodes(e.target.value));
     
     // Editor
@@ -260,6 +264,7 @@ async function openNode(nodeId) {
         updatePreview();
         updateWordCount();
         loadReferences();
+        loadNodeURIs();
         
         renderNodesList();
     } catch (e) {
@@ -540,6 +545,134 @@ async function addTag() {
     } catch (e) {
         console.error('Failed to add tag:', e);
     }
+}
+
+// ====== PLUGIN MANAGEMENT ======
+async function loadPlugins() {
+    try {
+        const resp = await fetch('/api/plugins-registry');
+        if (!resp.ok) {
+            console.error('Failed to load plugins: ', resp.status);
+            return;
+        }
+        const data = await resp.json();
+        const list = document.getElementById('pluginsList');
+        list.innerHTML = '';
+        (data || []).forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'flex items-center justify-between p-3 border rounded-lg';
+            el.innerHTML = `<div class="text-sm"><div class="font-medium">${p.name}</div><div class="text-xs text-slate-500">${p.slug}</div></div><div><button class="toggle-btn px-3 py-1 rounded-lg text-sm">${p.enabled ? 'Disable' : 'Enable'}</button></div>`;
+            el.querySelector('.toggle-btn').addEventListener('click', () => togglePlugin(p));
+            list.appendChild(el);
+        });
+    } catch (e) {
+        console.error('Failed to load plugins', e);
+    }
+}
+
+async function togglePlugin(plugin) {
+    try {
+        // Flip enabled flag
+        const updated = Object.assign({}, plugin, { enabled: !plugin.enabled });
+        const resp = await fetch('/api/plugins-registry', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated)
+        });
+        if (!resp.ok) {
+            const body = await resp.text().catch(() => resp.statusText);
+            alert('Failed to update plugin: ' + body);
+            return;
+        }
+        await loadPlugins();
+    } catch (e) {
+        console.error('togglePlugin failed', e);
+    }
+}
+
+// ====== SITE EDITOR ======
+function populateSiteEditor() {
+    if (!currentSite) return;
+    document.getElementById('siteNameInput').value = currentSite.name || '';
+    document.getElementById('siteDescriptionInput').value = currentSite.description || '';
+    document.getElementById('siteTypeInput').value = currentSite.type || 'project';
+}
+
+async function saveSiteEdits() {
+    if (!currentSite) return;
+    const name = document.getElementById('siteNameInput').value;
+    const description = document.getElementById('siteDescriptionInput').value;
+    const type = document.getElementById('siteTypeInput').value;
+
+    try {
+        const resp = await fetch('/api/sites', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: currentSite.id, name, description, type })
+        });
+        if (!resp.ok) {
+            const body = await resp.text().catch(() => resp.statusText);
+            alert('Failed to update site: ' + body);
+            return;
+        }
+        const updated = await resp.json();
+        // Refresh sites list
+        await loadSites();
+        // Update currentSite reference
+        currentSite = updated;
+        closeModal('siteEditorModal');
+        alert('✓ Site updated');
+    } catch (e) {
+        console.error('Failed to save site edits', e);
+        alert('Failed to update site');
+    }
+}
+
+// ====== NODE URI MANAGEMENT ======
+async function loadNodeURIs() {
+    if (!currentNode) return;
+    try {
+        const resp = await fetch(`/api/node-uris?node_id=${encodeURIComponent(currentNode.id)}`);
+        if (!resp.ok) {
+            console.error('Failed to load URIs', resp.status);
+            return;
+        }
+        const uris = await resp.json();
+        const el = document.getElementById('nodeUris');
+        el.innerHTML = '';
+        if (!uris || uris.length === 0) {
+            el.innerHTML = '<li class="text-slate-500">No URIs</li>';
+            return;
+        }
+        uris.forEach(u => {
+            const item = document.createElement('li');
+            item.className = 'flex items-center justify-between';
+            item.innerHTML = `<div class="text-sm"><div class="font-medium">${u.uri}</div></div><div><button class="text-xs text-red-600">Delete</button></div>`;
+            item.querySelector('button').addEventListener('click', () => deleteNodeURI(u.id));
+            el.appendChild(item);
+        });
+    } catch (e) {
+        console.error('loadNodeURIs failed', e);
+    }
+}
+
+function addUriPrompt() {
+    if (!currentNode) { alert('Open a node first'); return; }
+    const uri = prompt('Enter URI (e.g., /projects/my-portfolio)');
+    if (!uri) return;
+    addNodeURI(uri);
+}
+
+async function addNodeURI(uri) {
+    try {
+        const resp = await fetch('/api/node-uris', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ node_id: currentNode.id, uri }) });
+        if (!resp.ok) { alert('Failed to add URI'); return; }
+        await loadNodeURIs();
+    } catch (e) { console.error('addNodeURI failed', e); }
+}
+
+async function deleteNodeURI(id) {
+    try {
+        const resp = await fetch(`/api/node-uris?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!resp.ok) { alert('Failed to delete URI'); return; }
+        await loadNodeURIs();
+    } catch (e) { console.error('deleteNodeURI failed', e); }
 }
 
 // ====== UI UTILITIES ======
