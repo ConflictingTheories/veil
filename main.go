@@ -1,10 +1,13 @@
 package main
 
 import (
+	"archive/zip"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +17,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	codexpkg "veil/pkg/codex"
+	fsstorage "veil/pkg/codex/storage/fs"
+	plugins "veil/pkg/plugins"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,6 +42,12 @@ func main() {
 
 	command := os.Args[1]
 	switch command {
+	case "codex":
+		codexCommand()
+		return
+	case "migrate":
+		migrateCommand()
+		return
 	case "init":
 		initVault()
 	case "serve":
@@ -66,6 +79,134 @@ func main() {
 	default:
 		printUsage()
 	}
+}
+
+func codexCommand() {
+	// Usage: veil codex status [path]
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: veil codex <status> [repo-path]")
+		return
+	}
+	action := os.Args[2]
+	switch action {
+	case "status":
+		repoPath := "."
+		if len(os.Args) >= 4 {
+			repoPath = os.Args[3]
+		}
+		storage := fsstorage.New(repoPath)
+		repo := codexpkg.NewRepository(storage, repoPath)
+		st, err := repo.Status()
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			return
+		}
+		b, _ := json.MarshalIndent(st, "", "  ")
+		fmt.Println(string(b))
+	default:
+		fmt.Println("Unknown codex action; supported: status")
+	}
+}
+
+func migrateCommand() {
+	// Usage: veil migrate [--dry-run] [--backup] [repo-path]
+	dryRun := false
+	doBackup := false
+	repoPath := "."
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--dry-run":
+			dryRun = true
+		case "--backup":
+			doBackup = true
+		default:
+			repoPath = os.Args[i]
+		}
+	}
+
+	if doBackup {
+		backupPath, err := createBackupZip(repoPath)
+		if err != nil {
+			fmt.Printf("backup failed: %v\n", err)
+			return
+		}
+		fmt.Printf("backup created: %s\n", backupPath)
+	}
+
+	// Dry-run: report counts
+	objsDir := filepath.Join(repoPath, ".codex", "objects")
+	count := 0
+	if fi, err := os.Stat(objsDir); err == nil && fi.IsDir() {
+		files, _ := ioutil.ReadDir(objsDir)
+		for _, f := range files {
+			if !f.IsDir() {
+				count++
+			}
+		}
+	}
+	fmt.Printf(".codex objects: %d\n", count)
+
+	if dryRun {
+		fmt.Println("dry-run: no other actions performed")
+	} else {
+		fmt.Println("migrate: (no-op) -- full migration not implemented yet")
+	}
+}
+
+func createBackupZip(base string) (string, error) {
+	// create zip named veil-backup-<timestamp>.zip in base
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	out := filepath.Join(base, fmt.Sprintf("veil-backup-%s.zip", ts))
+	f, err := os.Create(out)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	defer zw.Close()
+
+	// include veil.db if exists
+	dbFile := filepath.Join(base, "veil.db")
+	if fi, err := os.Stat(dbFile); err == nil && !fi.IsDir() {
+		if err := addFileToZip(zw, dbFile, "veil.db"); err != nil {
+			return "", err
+		}
+	}
+
+	// include .codex directory if present
+	codexDir := filepath.Join(base, ".codex")
+	if fi, err := os.Stat(codexDir); err == nil && fi.IsDir() {
+		// walk objects
+		objectsDir := filepath.Join(codexDir, "objects")
+		if fi2, err := os.Stat(objectsDir); err == nil && fi2.IsDir() {
+			files, _ := ioutil.ReadDir(objectsDir)
+			for _, f := range files {
+				if f.IsDir() {
+					continue
+				}
+				path := filepath.Join(objectsDir, f.Name())
+				if err := addFileToZip(zw, path, filepath.Join(".codex", "objects", f.Name())); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func addFileToZip(zw *zip.Writer, path, rel string) error {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	w, err := zw.Create(rel)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
 }
 
 func printUsage() {
@@ -186,7 +327,7 @@ func serve() {
 	initCredentialManager()
 	initURIResolver()
 	// Load enabled plugins from DB and register them at runtime
-	loadEnabledPluginsFromDB()
+	plugins.LoadEnabledPluginsFromDB(db)
 
 	mux := setupRoutes()
 	addr := ":" + port
@@ -213,7 +354,7 @@ func gui() {
 	initPluginRegistry()
 	initCredentialManager()
 	initURIResolver()
-	loadEnabledPluginsFromDB()
+	plugins.LoadEnabledPluginsFromDB(db)
 
 	mux := setupRoutes()
 	go func() {
@@ -238,6 +379,10 @@ func gui() {
 }
 
 func setupRoutes() *http.ServeMux {
+	// Ensure URI resolver initialized for tests and server
+	if uriResolver == nil {
+		initURIResolver()
+	}
 	mux := http.NewServeMux()
 
 	// Serve a no-content favicon to avoid 404 noise in browser consoles
@@ -311,10 +456,10 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/preview/", handlePreview)
 
 	// Plugin APIs (NEW)
-	mux.HandleFunc("/api/plugins", handlePluginsList)
-	mux.HandleFunc("/api/plugin-execute", handlePluginExecute)
-	mux.HandleFunc("/api/credentials", handleCredentialsAPI)
-	mux.HandleFunc("/api/publish-job", handlePublishJob)
+	mux.HandleFunc("/api/plugins", plugins.HandlePluginsList)
+	mux.HandleFunc("/api/plugin-execute", plugins.HandlePluginExecute)
+	mux.HandleFunc("/api/credentials", plugins.HandleCredentialsAPI)
+	mux.HandleFunc("/api/publish-job", plugins.HandlePublishJob)
 	mux.HandleFunc("/api/plugins-registry", handlePluginsRegistry)
 	mux.HandleFunc("/api/node-uris", handleNodeURIs)
 	mux.HandleFunc("/api/resolve-uri", handleResolveURI)

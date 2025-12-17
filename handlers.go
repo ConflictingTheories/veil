@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	plugins "veil/pkg/plugins"
 )
 
 // === API Handlers - Core ===
@@ -439,7 +440,7 @@ func handlePluginsRegistry(w http.ResponseWriter, r *http.Request) {
 		}
 		// Runtime registration/unregistration
 		if req.Enabled {
-			p := instantiatePluginBySlug(req.Slug)
+			p := plugins.InstantiatePluginBySlug(req.Slug)
 			if p != nil {
 				var cfg map[string]interface{}
 				if req.Manifest != "" {

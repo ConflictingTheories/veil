@@ -685,3 +685,7 @@ GIT_REPO_URL=https://github.com/user/vault.git
 **Created:** December 2025  
 **License:** MIT  
 **Author:** [You]
+
+## Integration & Roadmap 📚
+
+For the plan to merge **Veil** and **Codex**, an implementation and migration guide has been added to the repository: `docs/INTEGRATION_PLAN.md` (contains the repo audit, design decisions, migration steps, developer-level actions, and suggested commands). Please read and follow this doc for the unified effort.
