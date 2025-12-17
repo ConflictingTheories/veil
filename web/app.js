@@ -6,6 +6,7 @@ let currentSite = null;
 let currentNode = null;
 let allNodes = [];
 let allSites = [];
+let allPlugins = [];
 let autoSaveTimer = null;
 let autoSaveEnabled = true;
 
@@ -40,7 +41,7 @@ function setupEventListeners() {
     document.getElementById('newSiteBtn')?.addEventListener('click', createNewSite);
     document.getElementById('newNoteBtn')?.addEventListener('click', createNewNote);
     document.getElementById('settingsBtn')?.addEventListener('click', () => openModal('settingsModal'));
-    document.getElementById('pluginsBtn')?.addEventListener('click', async () => { openModal('pluginsModal'); await loadPlugins(); });
+    document.getElementById('pluginsBtn')?.addEventListener('click', async () => { openModal('pluginsModal'); await loadPlugins(); await loadPluginStates(); });
     document.getElementById('exportBtn')?.addEventListener('click', () => openModal('exportModal'));
     document.getElementById('openSiteEditor')?.addEventListener('click', () => { openModal('siteEditorModal'); populateSiteEditor(); });
     document.getElementById('saveSiteBtn')?.addEventListener('click', saveSiteEdits);
@@ -598,23 +599,42 @@ async function loadPlugins() {
             return;
         }
         const data = await resp.json();
-        const list = document.getElementById('pluginsList');
-        if (!list) {
-            console.error('pluginsList element not found');
-            return;
-        }
-        list.innerHTML = '';
-        (data || []).forEach(p => {
-            const el = document.createElement('div');
-            el.className = 'plugin-item flex items-center justify-between p-3 border rounded-lg';
-            el.dataset.pluginSlug = p.slug;
-            el.innerHTML = `<div class="text-sm"><div class="font-medium">${p.name}</div><div class="text-xs text-slate-500">${p.slug}</div></div><div><button class="toggle-btn px-3 py-1 rounded-lg text-sm">${p.enabled ? 'Disable' : 'Enable'}</button></div>`;
-            el.addEventListener('contextmenu', (e) => showPluginContextMenu(e, p.slug));
-            el.querySelector('.toggle-btn').addEventListener('click', () => togglePlugin(p));
-            list.appendChild(el);
+
+        // Update existing plugin toggles in the modal
+        data.forEach(p => {
+            const toggle = document.querySelector(`input[data-plugin="${p.slug}"]`);
+            if (toggle) {
+                toggle.checked = p.enabled;
+                // Remove existing listeners to avoid duplicates
+                toggle.replaceWith(toggle.cloneNode(true));
+                const newToggle = document.querySelector(`input[data-plugin="${p.slug}"]`);
+                newToggle.addEventListener('change', () => togglePluginFromUI(p.slug, newToggle.checked));
+            }
         });
     } catch (e) {
         console.error('Failed to load plugins', e);
+    }
+}
+
+async function loadPluginStates() {
+    // Plugin states are loaded in loadPlugins, so this can be a no-op or refresh
+    await loadPlugins();
+}
+
+async function togglePluginFromUI(pluginSlug, enabled) {
+    try {
+        const resp = await fetch('/api/plugins-registry', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: pluginSlug, enabled })
+        });
+        if (!resp.ok) {
+            alert('Failed to update plugin');
+            return;
+        }
+        await loadPlugins();
+    } catch (e) {
+        console.error('togglePluginFromUI failed', e);
     }
 }
 
@@ -2404,50 +2424,55 @@ async function deleteReminder(id) {
     }
 }
 
-// ====== CODEX EMBED HANDLERS ======
-function showCodexPanel() {
-    const panel = document.getElementById('codexPanel');
-    if (!panel) return;
-    panel.classList.remove('hidden');
-    // ensure iframe has src set (lazy load)
-    const iframe = document.getElementById('codexIframe');
-    if (iframe && !iframe.src) {
-        iframe.src = '/codex-prototype/index.html';
+// ====== CODEX STATUS PANEL (NATIVE INTEGRATION) ======
+async function showCodexStatusPanel() {
+    let panel = document.getElementById('codexStatusPanel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'codexStatusPanel';
+        panel.className = 'fixed top-16 right-8 w-96 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-6';
+        panel.innerHTML = `
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="font-bold text-lg text-indigo-700 flex items-center gap-2">
+                    <span style="font-size:1.3em">🧠</span> Codex Status
+                </h2>
+                <button id="closeCodexStatusBtn" class="text-slate-400 hover:text-slate-700 text-xl">&times;</button>
+            </div>
+            <div id="codexStatusContent">Loading...</div>
+        `;
+        document.body.appendChild(panel);
+        document.getElementById('closeCodexStatusBtn').onclick = () => panel.remove();
+    } else {
+        panel.style.display = '';
     }
-}
-
-function hideCodexPanel() {
-    const panel = document.getElementById('codexPanel');
-    if (!panel) return;
-    panel.classList.add('hidden');
-}
-
-// Send selected node data to Codex iframe (postMessage)
-function sendNodeToCodex(node) {
+    // Fetch status
     try {
-        const iframe = document.getElementById('codexIframe');
-        if (!iframe) return;
-        iframe.contentWindow.postMessage({ type: 'veil:node-selected', node }, '*');
+        const resp = await fetch('/api/codex/status');
+        if (!resp.ok) throw new Error('Failed to fetch Codex status');
+        const data = await resp.json();
+        document.getElementById('codexStatusContent').innerHTML = `
+            <div class="space-y-2">
+                <div><b>Repo Path:</b> <code>${data.path || '-'}</code></div>
+                <div><b>Objects:</b> ${data.objects || 0}</div>
+                <div><b>Commits:</b> ${data.commits || 0}</div>
+                <div><b>HEAD:</b> <code>${data.head || '-'}</code></div>
+                <div><b>Checked At:</b> ${data.checked_at || '-'}</div>
+            </div>
+        `;
     } catch (e) {
-        console.warn('Failed to post message to Codex iframe', e);
+        document.getElementById('codexStatusContent').innerHTML = `<span class="text-red-600">Error: ${e.message}</span>`;
     }
 }
 
-// Hook the buttons
-(function attachCodexHandlers() {
-    const codexBtn = document.getElementById('codexBtn');
-    if (codexBtn) codexBtn.addEventListener('click', () => showCodexPanel());
-    const codexClose = document.getElementById('codexCloseBtn');
-    if (codexClose) codexClose.addEventListener('click', () => hideCodexPanel());
-
-    // When a node is opened in Veil, send to Codex if panel open
-    const originalOpenNode = window.openNode;
-    window.openNode = async function (nodeId) {
-        await originalOpenNode(nodeId);
-        if (!document.getElementById('codexPanel')) return;
-        if (!document.getElementById('codexPanel').classList.contains('hidden')) {
-            // currentNode is set by openNode; send its minimal data
-            if (window.currentNode) sendNodeToCodex({ id: currentNode.id, title: currentNode.title, content: currentNode.content });
-        }
+// Attach Codex status button if not present
+document.addEventListener('DOMContentLoaded', () => {
+    let codexStatusBtn = document.getElementById('codexStatusBtn');
+    if (!codexStatusBtn) {
+        codexStatusBtn = document.createElement('button');
+        codexStatusBtn.id = 'codexStatusBtn';
+        codexStatusBtn.className = 'fixed bottom-8 right-8 bg-indigo-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-indigo-700 z-50';
+        codexStatusBtn.innerHTML = '<span style="font-size:1.2em">🧠</span> Codex Status';
+        codexStatusBtn.onclick = showCodexStatusPanel;
+        document.body.appendChild(codexStatusBtn);
     }
-})();
+});

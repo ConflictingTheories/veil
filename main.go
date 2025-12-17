@@ -326,6 +326,8 @@ func serve() {
 	initPluginRegistry()
 	initCredentialManager()
 	initURIResolver()
+	// Populate plugins registry with all known plugins
+	plugins.PopulatePluginsRegistry(db)
 	// Load enabled plugins from DB and register them at runtime
 	plugins.LoadEnabledPluginsFromDB(db)
 
@@ -354,6 +356,9 @@ func gui() {
 	initPluginRegistry()
 	initCredentialManager()
 	initURIResolver()
+	// Populate plugins registry with all known plugins
+	plugins.PopulatePluginsRegistry(db)
+	// Load enabled plugins from DB and register them at runtime
 	plugins.LoadEnabledPluginsFromDB(db)
 
 	mux := setupRoutes()

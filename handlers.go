@@ -448,7 +448,7 @@ func handlePluginsRegistry(w http.ResponseWriter, r *http.Request) {
 				}
 				if err := p.Initialize(cfg); err != nil {
 					log.Printf("plugin init failed for %s: %v", req.Slug, err)
-				} else if err := pluginRegistry.Register(p); err != nil {
+				} else if err := plugins.GetRegistry().Register(p); err != nil {
 					log.Printf("plugin register failed for %s: %v", req.Slug, err)
 				} else {
 					log.Printf("plugin %s enabled and registered", req.Slug)
@@ -456,9 +456,9 @@ func handlePluginsRegistry(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// Try by slug first, then name
-			if err := pluginRegistry.Unregister(req.Slug); err != nil {
+			if err := plugins.GetRegistry().Unregister(req.Slug); err != nil {
 				if req.Name != "" {
-					pluginRegistry.Unregister(req.Name)
+					plugins.GetRegistry().Unregister(req.Name)
 				}
 			}
 		}

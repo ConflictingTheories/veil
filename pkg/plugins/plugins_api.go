@@ -20,39 +20,41 @@ func SetDB(d *sql.DB) {
 // === Plugin Initialization ===
 
 func initializeDefaultPlugins() {
+	registry := GetRegistry()
+
 	// Git
 	gitPlugin := NewGitPlugin()
-	if err := pluginRegistry.Register(gitPlugin); err != nil {
+	if err := registry.Register(gitPlugin); err != nil {
 		log.Println("Git plugin registration:", err)
 	}
 
 	// IPFS
 	ipfsPlugin := NewIPFSPlugin("http://localhost:5001")
-	if err := pluginRegistry.Register(ipfsPlugin); err != nil {
+	if err := registry.Register(ipfsPlugin); err != nil {
 		log.Println("IPFS plugin registration:", err)
 	}
 
 	// Namecheap
 	ncPlugin := NewNamecheapPlugin()
-	if err := pluginRegistry.Register(ncPlugin); err != nil {
+	if err := registry.Register(ncPlugin); err != nil {
 		log.Println("Namecheap plugin registration:", err)
 	}
 
 	// Media
 	mediaPlugin := NewMediaPlugin("./media_output")
-	if err := pluginRegistry.Register(mediaPlugin); err != nil {
+	if err := registry.Register(mediaPlugin); err != nil {
 		log.Println("Media plugin registration:", err)
 	}
 
 	// Pixospritz
 	pixoPlugin := NewPixospritzPlugin("http://localhost:3000")
-	if err := pluginRegistry.Register(pixoPlugin); err != nil {
+	if err := registry.Register(pixoPlugin); err != nil {
 		log.Println("Pixospritz plugin registration:", err)
 	}
 
 	// Terminal Scripting
 	terminalPlugin := NewTerminalScriptingPlugin()
-	if err := pluginRegistry.Register(terminalPlugin); err != nil {
+	if err := registry.Register(terminalPlugin); err != nil {
 		log.Println("Terminal scripting plugin registration:", err)
 	}
 	if err := terminalPlugin.Initialize(map[string]interface{}{"safe_mode": true}); err != nil {
@@ -61,7 +63,7 @@ func initializeDefaultPlugins() {
 
 	// Reminder
 	reminderPlugin := NewReminderPlugin()
-	if err := pluginRegistry.Register(reminderPlugin); err != nil {
+	if err := registry.Register(reminderPlugin); err != nil {
 		log.Println("Reminder plugin registration:", err)
 	}
 	if err := reminderPlugin.Initialize(map[string]interface{}{}); err != nil {
@@ -117,15 +119,16 @@ func HandlePluginExecute(w http.ResponseWriter, r *http.Request) {
 // These helper functions support the main handlers
 
 func publishToGit(ctx context.Context, job PublishJob, config map[string]interface{}) (interface{}, error) {
+	registry := GetRegistry()
 	// Use Git plugin
-	result, err := pluginRegistry.Execute(ctx, "git", "commit", map[string]interface{}{
+	result, err := registry.Execute(ctx, "git", "commit", map[string]interface{}{
 		"node_id": job.NodeID,
 		"message": fmt.Sprintf("Published version %s", job.VersionID),
 	})
 
 	if err == nil {
 		// Push
-		pluginRegistry.Execute(ctx, "git", "push", map[string]interface{}{
+		registry.Execute(ctx, "git", "push", map[string]interface{}{
 			"message": "Auto-sync published version",
 			"branch":  "main",
 		})
@@ -254,6 +257,45 @@ func InstantiatePluginBySlug(slug string) Plugin {
 		return NewTerminalScriptingPlugin()
 	default:
 		return nil
+	}
+}
+
+// PopulatePluginsRegistry ensures all known plugins are in the plugins_registry table
+func PopulatePluginsRegistry(db *sql.DB) {
+	// List of all known plugins with their metadata
+	knownPlugins := []struct {
+		name string
+		slug string
+	}{
+		{"Git", "git"},
+		{"IPFS", "ipfs"},
+		{"Namecheap", "namecheap"},
+		{"Media", "media"},
+		{"Pixospritz", "pixospritz"},
+		{"Shader", "shader"},
+		{"SVG", "svg"},
+		{"Code", "code"},
+		{"Todo", "todo"},
+		{"Reminder", "reminder"},
+		{"Terminal Scripting", "terminal"},
+	}
+
+	now := time.Now().Unix()
+	for _, plugin := range knownPlugins {
+		// Check if plugin already exists
+		var count int
+		db.QueryRow(`SELECT COUNT(*) FROM plugins_registry WHERE slug = ?`, plugin.slug).Scan(&count)
+		if count == 0 {
+			// Insert with enabled=0
+			id := fmt.Sprintf("plugin_%d", time.Now().UnixNano())
+			_, err := db.Exec(`INSERT INTO plugins_registry (id, name, slug, manifest, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`,
+				id, plugin.name, plugin.slug, "", now, now)
+			if err != nil {
+				log.Printf("Failed to insert plugin %s: %v\n", plugin.slug, err)
+			} else {
+				log.Printf("Added plugin to registry: %s (%s)\n", plugin.name, plugin.slug)
+			}
+		}
 	}
 }
 

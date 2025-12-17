@@ -1,0 +1,92 @@
+# Veil Project Roadmap
+Presently it has a lot of disjoint components, pieces, logic, and yet it is supposed to be a single cohesive system.
+
+The concept for this project is called "Veil" which is an advanced - powerful - knowledge mapping and publishing system. 
+
+It is based around git-like knowledge version control baked in - an ontological knowledge graph called "codex" which is part of the veil ecosystem. This codex is the git knowledge graph and stores all the information, versions, branches, that are introduced into veil.
+
+The idea is that veil should be able to support binary data, blobs, text, code, graphs, etc without issues.
+
+The information stored in Codex can be retrieved, presented, exported. and published in a variety of ways.
+
+It has direct "Git" support via a git plugin which allows one to commit directly to a git instance as a backend, as well it can also act as a server itselfg for decentralized and disttributed knowledge systems (possibly read-only) where one can reference alternative opinions, or different such relationships and source material.
+
+Additionally, people can form a second brain - allowing them to generate notes, store media, files, reminders, todos, pictures. music, code, etc and have it accessible via sync through cloning - or pushing.
+
+This vision is not yet achieved, and I need you to shore everyting up so that this ultimate vision comes to fruition. Your job is to implement this vision.
+
+Many of the parts are loosely there, but much needs to be cleaned up, fixed, merged, modified, and improved. Most of the functionality is disjointed and not integrated across the entire ecosystem.
+
+Additionally, there are many bugs and conceptual mistakes that need to be rectified.
+
+## OBJECTIVE
+Your objective is to implement the vision as listed below in entirety. You will take no shortcuts, you will leave no todos. You will ask for no further information, clarification, nor will you prompt to continue until you have completed the entire vision. You will not cheat, shortcut, take the easy way out, over-engineer, nor get stuck in any loops. You will focus on completing the task and getting all fumctionality in place before you worry about tests as testing is slow, and you are not good at testing. Instead, you will only use syntax and static code analyis and compile time warnings - your priority is to iomplemtn this vision - not testing.
+
+## Vision
+Veil is an advanced, powerful knowledge mapping and publishing system. It features:
+- Git-like knowledge version control (Codex)
+- Ontological knowledge graph (Codex) for storing all information, versions, branches
+- Support for binary data, blobs, text, code, graphs, and more
+- Retrieval, presentation, export, and publishing of knowledge in various formats
+- Direct Git support via plugin (commit/push to Git backends)
+- Server mode for decentralized/distributed knowledge systems
+- Reference and relationship mapping (alternative opinions, sources, etc.)
+- "Second brain" features: notes, media, reminders, todos, code, etc., with sync/cloning/push
+
+## Roadmap
+
+### 1. Core Architecture & Integration
+- [ ] Review and document all existing components and their responsibilities
+- [ ] Refactor and merge disjointed logic into a unified architecture
+- [ ] Ensure Codex is the single source of truth for all knowledge data
+- [ ] Integrate plugins (Git, media, reminders, todos, etc.) into the core workflow
+- [ ] Standardize data models and interfaces across the system
+
+### 2. Codex (Knowledge Graph)
+- [ ] Audit and refactor Codex implementation for full git-like versioning (branches, merges, history)
+- [ ] Ensure support for all data types (binary, blobs, text, code, graphs)
+- [ ] Implement efficient storage and retrieval for large/binary data
+- [ ] Expose robust API for CRUD, branching, merging, and querying
+- [ ] Add export/import and publishing capabilities
+
+### 3. Plugin System
+- [ ] Review all plugins (Git, IPFS, media, reminders, todos, etc.)
+- [ ] Standardize plugin API and lifecycle
+- [ ] Ensure plugins can interact with Codex and core system seamlessly
+- [ ] Fix bugs and conceptual issues in existing plugins
+- [ ] Add missing features (e.g., media sync, advanced reminders)
+
+### 4. Git Integration
+- [ ] Ensure seamless commit, push, pull, and branch operations to/from Git backends
+- [ ] Support for decentralized/distributed operation (read-only, alternative sources)
+- [ ] Enable referencing and mapping of external knowledge sources
+
+### 5. Server & API
+- [ ] Refactor server mode for robust decentralized/distributed operation
+- [ ] Expose REST/gRPC/WebSocket APIs for all core features
+- [ ] Add authentication, access control, and multi-user support
+
+### 6. User Experience & UI
+- [ ] Audit and unify all UI components (web, CLI, GUI)
+- [ ] Integrate Codex and plugin features into a cohesive user experience
+- [ ] Add missing UI for advanced features (branching, merging, publishing, media, etc.)
+- [ ] Improve error handling, feedback, and documentation
+
+### 7. Second Brain Features
+- [ ] Ensure robust support for notes, todos, reminders, media, code, etc.
+- [ ] Implement sync, clone, and push for all data types
+- [ ] Add advanced search, linking, and relationship mapping
+
+### 8. Testing & Quality
+- [ ] Write/expand unit, integration, and end-to-end tests
+- [ ] Fix all known bugs and conceptual mistakes
+- [ ] Add CI/CD for automated testing and deployment
+
+### 9. Documentation
+- [ ] Update and expand all documentation (README, API docs, usage guides)
+- [ ] Document architecture, data models, and plugin system
+- [ ] Provide onboarding and usage examples
+
+---
+
+**This roadmap will be updated as progress is made. Each item will be addressed and checked off as completed.**
