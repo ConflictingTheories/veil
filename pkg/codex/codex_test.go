@@ -112,3 +112,129 @@ func TestListCommitsAndDiff(t *testing.T) {
 		t.Fatalf("expected 1 added in diff, got %d", len(diff.Added))
 	}
 }
+
+func TestBranchCreateAndList(t *testing.T) {
+	tmpdir, err := ioutil.TempDir("", "codex-branch-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	fs := fsadapter.New(tmpdir)
+	r := codex.NewRepository(fs, tmpdir)
+
+	// create a branch
+	if err := r.CreateBranch("main", ""); err != nil {
+		t.Fatalf("create branch error: %v", err)
+	}
+
+	// set head
+	if err := r.SetRef("refs/heads/main", "c1"); err != nil {
+		t.Fatalf("setref error: %v", err)
+	}
+
+	h, err := r.GetRef("refs/heads/main")
+	if err != nil {
+		t.Fatalf("getref error: %v", err)
+	}
+	if h != "c1" {
+		t.Fatalf("expected head c1, got %s", h)
+	}
+
+	branches, err := r.ListBranches()
+	if err != nil {
+		t.Fatalf("list branches: %v", err)
+	}
+	found := false
+	for _, b := range branches {
+		if b == "main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected main branch in %v", branches)
+	}
+}
+
+func TestMergeCommits_NoConflict(t *testing.T) {
+	tmpdir, err := ioutil.TempDir("", "codex-merge-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	fs := fsadapter.New(tmpdir)
+
+	// create base commit with o1
+	_ = fs.PutObject("o1", []byte(`{"urn":"urn:node:1","title":"base"}`))
+	c1 := &codex.Commit{Hash: "c1", Author: "a", Timestamp: time.Now().Add(-time.Hour), Message: "base", Objects: []string{"o1"}}
+	fs.PutCommit(c1)
+
+	// ours adds o2
+	_ = fs.PutObject("o2", []byte(`{"urn":"urn:node:2","title":"ours"}`))
+	c2 := &codex.Commit{Hash: "c2", Parents: []string{"c1"}, Author: "a", Timestamp: time.Now().Add(-30 * time.Minute), Message: "ours", Objects: []string{"o1", "o2"}}
+	fs.PutCommit(c2)
+
+	// theirs adds o3
+	_ = fs.PutObject("o3", []byte(`{"urn":"urn:node:3","title":"theirs"}`))
+	c3 := &codex.Commit{Hash: "c3", Parents: []string{"c1"}, Author: "b", Timestamp: time.Now(), Message: "theirs", Objects: []string{"o1", "o3"}}
+	fs.PutCommit(c3)
+
+	r := codex.NewRepository(fs, tmpdir)
+	mcommit, conflicts, err := r.MergeCommits("c1", "c2", "c3", "merger", "merge msg")
+	if err != nil {
+		t.Fatalf("merge error: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected no conflicts, got %v", conflicts)
+	}
+	// merged commit should contain o1,o2,o3
+	found := map[string]struct{}{}
+	for _, h := range mcommit.Objects {
+		found[h] = struct{}{}
+	}
+	for _, want := range []string{"o1", "o2", "o3"} {
+		if _, ok := found[want]; !ok {
+			t.Fatalf("expected merged object %s", want)
+		}
+	}
+}
+
+func TestMergeCommits_Conflict(t *testing.T) {
+	tmpdir, err := ioutil.TempDir("", "codex-merge-test-2-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	fs := fsadapter.New(tmpdir)
+	// base: node with urn:urn:node:1 value v1
+	_ = fs.PutObject("o1", []byte(`{"urn":"urn:node:1","title":"v1"}`))
+	c1 := &codex.Commit{Hash: "c1", Author: "a", Timestamp: time.Now().Add(-time.Hour), Message: "base", Objects: []string{"o1"}}
+	fs.PutCommit(c1)
+
+	// ours modifies node -> o1a
+	_ = fs.PutObject("o1a", []byte(`{"urn":"urn:node:1","title":"v2"}`))
+	c2 := &codex.Commit{Hash: "c2", Parents: []string{"c1"}, Author: "a", Timestamp: time.Now().Add(-30 * time.Minute), Message: "ours", Objects: []string{"o1a"}}
+	fs.PutCommit(c2)
+
+	// theirs modifies node differently -> o1b
+	_ = fs.PutObject("o1b", []byte(`{"urn":"urn:node:1","title":"v3"}`))
+	c3 := &codex.Commit{Hash: "c3", Parents: []string{"c1"}, Author: "b", Timestamp: time.Now(), Message: "theirs", Objects: []string{"o1b"}}
+	fs.PutCommit(c3)
+
+	r := codex.NewRepository(fs, tmpdir)
+	mcommit, conflicts, err := r.MergeCommits("c1", "c2", "c3", "merger", "merge msg")
+	if err != nil {
+		t.Fatalf("merge error: %v", err)
+	}
+	if mcommit != nil {
+		t.Fatalf("expected no commit when conflicts, got %v", mcommit)
+	}
+	if len(conflicts) == 0 {
+		t.Fatalf("expected conflicts, got none")
+	}
+	if conflicts[0].URN != "urn:node:1" {
+		t.Fatalf("unexpected conflict urn: %s", conflicts[0].URN)
+	}
+}

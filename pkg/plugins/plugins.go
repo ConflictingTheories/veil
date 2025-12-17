@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"veil/pkg/codex"
 )
 
 // === Plugin Architecture ===
@@ -105,6 +106,30 @@ func (pr *PluginRegistry) Unregister(name string) error {
 	}
 
 	delete(pr.plugins, name)
+	return nil
+}
+
+// RepositoryAware is an optional interface that plugins can implement
+// to receive a reference to the core codex Repository. The plugin manager
+// will call AttachRepository when a repository is available.
+type RepositoryAware interface {
+	AttachRepository(*codex.Repository) error
+}
+
+// AttachRepositoryToAll iterates over registered plugins and calls AttachRepository
+// for those implementing RepositoryAware. This allows dependency injection of the
+// codex Repository into plugins at runtime.
+func (pr *PluginRegistry) AttachRepositoryToAll(repo *codex.Repository) error {
+	pr.mu.RLock()
+	defer pr.mu.RUnlock()
+
+	for name, p := range pr.plugins {
+		if ra, ok := p.(RepositoryAware); ok {
+			if err := ra.AttachRepository(repo); err != nil {
+				return fmt.Errorf("failed to attach repository to plugin %s: %w", name, err)
+			}
+		}
+	}
 	return nil
 }
 

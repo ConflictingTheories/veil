@@ -1,9 +1,12 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+	"veil/pkg/codex"
 )
 
 // === Reminder System Plugin ===
@@ -11,6 +14,7 @@ import (
 type ReminderPlugin struct {
 	name    string
 	version string
+	repo    *codex.Repository
 }
 
 func NewReminderPlugin() *ReminderPlugin {
@@ -89,6 +93,12 @@ func (rp *ReminderPlugin) Shutdown() error {
 	return nil
 }
 
+// AttachRepository implements RepositoryAware to receive codex repository
+func (rp *ReminderPlugin) AttachRepository(r *codex.Repository) error {
+	rp.repo = r
+	return nil
+}
+
 // Actions
 
 type Reminder struct {
@@ -142,6 +152,38 @@ func (rp *ReminderPlugin) createReminder(ctx context.Context, payload interface{
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reminder: %v", err)
+	}
+
+	// Store in Codex if repository is attached
+	if rp.repo != nil {
+		reminderData := map[string]interface{}{
+			"id":                reminder.ID,
+			"type":              "reminder",
+			"node_id":           reminder.NodeID,
+			"title":             reminder.Title,
+			"description":       reminder.Description,
+			"remind_at":         reminder.RemindAt,
+			"status":            reminder.Status,
+			"recurrence":        reminder.Recurrence,
+			"notification_sent": reminder.NotificationSent,
+			"created_at":        reminder.CreatedAt,
+			"modified_at":       reminder.ModifiedAt,
+			"urn":               fmt.Sprintf("urn:veil:reminder:%s", reminder.ID),
+		}
+
+		reminderJSON, _ := json.Marshal(reminderData)
+		hash, err := rp.repo.PutObjectStream(bytes.NewReader(reminderJSON), "application/json")
+		if err == nil {
+			commit := &codex.Commit{
+				Hash:      "",
+				Parents:   []string{},
+				Author:    "Reminder Plugin",
+				Timestamp: time.Unix(reminder.CreatedAt, 0),
+				Message:   fmt.Sprintf("Create reminder: %s", reminder.Title),
+				Objects:   []string{hash},
+			}
+			_ = rp.repo.PutCommit(commit)
+		}
 	}
 
 	return reminder, nil

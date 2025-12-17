@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	codexpkg "veil/pkg/codex"
 )
 
 // === Git Plugin ===
@@ -20,6 +22,7 @@ import (
 type GitPlugin struct {
 	name    string
 	version string
+	repo    *codexpkg.Repository
 }
 
 func NewGitPlugin() *GitPlugin {
@@ -95,6 +98,12 @@ func (gp *GitPlugin) Execute(ctx context.Context, action string, payload interfa
 }
 
 func (gp *GitPlugin) Shutdown() error {
+	return nil
+}
+
+// AttachRepository implements RepositoryAware (optional) to receive the codex Repository
+func (gp *GitPlugin) AttachRepository(r *codexpkg.Repository) error {
+	gp.repo = r
 	return nil
 }
 
@@ -221,6 +230,36 @@ func (gp *GitPlugin) commit(ctx context.Context, payload interface{}) (interface
 	cmd = exec.CommandContext(ctx, "git", "commit", "-m", message)
 	if err := cmd.Run(); err != nil {
 		log.Println("Commit info:", err)
+	}
+
+	// Also commit to Codex if repository is attached
+	if gp.repo != nil {
+		// Create node object in Codex
+		nodeData := map[string]interface{}{
+			"id":      node.ID,
+			"type":    "node",
+			"path":    node.Path,
+			"title":   node.Title,
+			"content": node.Content,
+			"urn":     fmt.Sprintf("urn:veil:node:%s", node.ID),
+		}
+
+		nodeJSON, _ := json.Marshal(nodeData)
+		hash, err := gp.repo.PutObjectStream(bytes.NewReader(nodeJSON), "application/json")
+		if err == nil {
+			commit := &codexpkg.Commit{
+				Hash:      "",
+				Parents:   []string{}, // Could track previous commits
+				Author:    "Git Plugin",
+				Timestamp: time.Now().UTC(),
+				Message:   message,
+				Objects:   []string{hash},
+			}
+
+			if err := gp.repo.PutCommit(commit); err != nil {
+				log.Printf("Codex commit error: %v", err)
+			}
+		}
 	}
 
 	// Record in database

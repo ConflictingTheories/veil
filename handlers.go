@@ -14,6 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	codexpkg "veil/pkg/codex"
+	fsstorage "veil/pkg/codex/storage/fs"
 	plugins "veil/pkg/plugins"
 )
 
@@ -72,6 +75,50 @@ func handleNodeCreate(w http.ResponseWriter, r *http.Request) {
 	node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
 	now := time.Now().Unix()
 
+	// Store node content in Codex
+	storage := fsstorage.New(".")
+	repo := codexpkg.NewRepository(storage, ".")
+
+	// Create node object for Codex
+	nodeData := map[string]interface{}{
+		"id":          node.ID,
+		"type":        node.Type,
+		"parent_id":   node.ParentID,
+		"path":        node.Path,
+		"title":       node.Title,
+		"content":     node.Content,
+		"mime_type":   node.MimeType,
+		"site_id":     node.SiteID,
+		"created_at":  now,
+		"modified_at": now,
+		"urn":         fmt.Sprintf("urn:veil:node:%s", node.ID),
+	}
+
+	nodeJSON, _ := json.Marshal(nodeData)
+	hash, err := repo.PutObjectStream(bytes.NewReader(nodeJSON), "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to store in Codex"})
+		return
+	}
+
+	// Create initial commit for the node
+	commit := &codexpkg.Commit{
+		Hash:      "",
+		Parents:   []string{},
+		Author:    "Veil System",
+		Timestamp: time.Unix(now, 0),
+		Message:   fmt.Sprintf("Create node: %s", node.Title),
+		Objects:   []string{hash},
+	}
+
+	if err := repo.PutCommit(commit); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create commit"})
+		return
+	}
+
+	// Store metadata in database
 	db.Exec(`INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, site_id, created_at, modified_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, node.SiteID, now, now)
@@ -102,6 +149,61 @@ func handleNodeUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&node)
 	now := time.Now().Unix()
 
+	// Get current node data from DB
+	var currentNode Node
+	var created int64
+	err := db.QueryRow(`SELECT id, type, parent_id, path, title, content, mime_type, site_id, created_at FROM nodes WHERE id = ?`, node.ID).
+		Scan(&currentNode.ID, &currentNode.Type, &currentNode.ParentID, &currentNode.Path, &currentNode.Title, &currentNode.Content, &currentNode.MimeType, &currentNode.SiteID, &created)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// Store updated node content in Codex
+	storage := fsstorage.New(".")
+	repo := codexpkg.NewRepository(storage, ".")
+
+	// Create updated node object for Codex
+	nodeData := map[string]interface{}{
+		"id":          node.ID,
+		"type":        node.Type,
+		"parent_id":   node.ParentID,
+		"path":        node.Path,
+		"title":       node.Title,
+		"content":     node.Content,
+		"mime_type":   node.MimeType,
+		"site_id":     node.SiteID,
+		"created_at":  created,
+		"modified_at": now,
+		"urn":         fmt.Sprintf("urn:veil:node:%s", node.ID),
+	}
+
+	nodeJSON, _ := json.Marshal(nodeData)
+	hash, err := repo.PutObjectStream(bytes.NewReader(nodeJSON), "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to store in Codex"})
+		return
+	}
+
+	// Get the latest commit for this node to create a new commit
+	// For simplicity, we'll create a new commit with the updated object
+	commit := &codexpkg.Commit{
+		Hash:      "",
+		Parents:   []string{}, // Could track parent commits here
+		Author:    "Veil System",
+		Timestamp: time.Unix(now, 0),
+		Message:   fmt.Sprintf("Update node: %s", node.Title),
+		Objects:   []string{hash},
+	}
+
+	if err := repo.PutCommit(commit); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create commit"})
+		return
+	}
+
+	// Update metadata in database
 	db.Exec(`UPDATE nodes SET title = ?, content = ?, modified_at = ? WHERE id = ?`,
 		node.Title, node.Content, now, node.ID)
 
@@ -746,242 +848,6 @@ func handleCitations(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(citations)
 }
 
-// === API Handlers - Sites ===
-func handleSites(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method == "GET" {
-		// List all sites
-		rows, err := db.Query(`SELECT id, name, description, type, created_at, modified_at FROM sites ORDER BY created_at DESC`)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		defer rows.Close()
-
-		sites := make([]Site, 0) // Initialize as empty slice, not nil
-		for rows.Next() {
-			var s Site
-			var createdAt, modifiedAt int64
-			err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Type, &createdAt, &modifiedAt)
-			if err != nil {
-				continue
-			}
-			s.CreatedAt = time.Unix(createdAt, 0)
-			s.ModifiedAt = time.Unix(modifiedAt, 0)
-			sites = append(sites, s)
-		}
-
-		json.NewEncoder(w).Encode(sites)
-	} else if r.Method == "POST" {
-		// Create new site
-		var req map[string]string
-		json.NewDecoder(r.Body).Decode(&req)
-
-		id := fmt.Sprintf("site_%d", time.Now().UnixNano())
-		name := req["name"]
-		description := req["description"]
-		siteType := req["type"]
-		if siteType == "" {
-			siteType = "project"
-		}
-
-		now := time.Now().Unix()
-		_, err := db.Exec(`
-			INSERT INTO sites (id, name, description, type, created_at, modified_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, id, name, description, siteType, now, now)
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		site := Site{
-			ID:          id,
-			Name:        name,
-			Description: description,
-			Type:        siteType,
-			CreatedAt:   time.Unix(now, 0),
-			ModifiedAt:  time.Unix(now, 0),
-		}
-
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(site)
-	} else if r.Method == "PUT" {
-		var s Site
-		json.NewDecoder(r.Body).Decode(&s)
-		if s.ID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "missing site id"})
-			return
-		}
-
-		now := time.Now().Unix()
-		_, err := db.Exec(`UPDATE sites SET name = ?, description = ?, type = ?, modified_at = ? WHERE id = ?`, s.Name, s.Description, s.Type, now, s.ID)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		s.ModifiedAt = time.Unix(now, 0)
-		json.NewEncoder(w).Encode(s)
-	}
-}
-
-func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Extract site ID from path like /api/sites/site_123/nodes
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 4 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	siteID := parts[3]
-
-	// Route to appropriate handler based on path structure
-	if len(parts) > 4 && parts[4] == "nodes" {
-		if len(parts) == 5 {
-			// /api/sites/site_123/nodes (GET list or POST create)
-			if r.Method == "POST" {
-				// Create node in site
-				var node Node
-				json.NewDecoder(r.Body).Decode(&node)
-				node.ID = fmt.Sprintf("node_%d", time.Now().UnixNano())
-				node.SiteID = siteID
-				now := time.Now().Unix()
-
-				_, err := db.Exec(`
-					INSERT INTO nodes (id, type, parent_id, path, title, content, mime_type, site_id, created_at, modified_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				`, node.ID, node.Type, node.ParentID, node.Path, node.Title, node.Content, node.MimeType, node.SiteID, now, now)
-
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-					return
-				}
-
-				// Create initial version
-				versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
-				db.Exec(`
-					INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				`, versionID, node.ID, 1, node.Content, node.Title, "draft", now, now, 1)
-
-				node.CreatedAt = time.Unix(now, 0)
-				node.ModifiedAt = time.Unix(now, 0)
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(node)
-			} else {
-				// List nodes in site
-				handleSiteNodes(w, r, siteID)
-			}
-		} else if len(parts) == 6 {
-			// /api/sites/site_123/nodes/node_456 (GET single node, PUT update, DELETE)
-			nodeID := parts[5]
-
-			if r.Method == "GET" {
-				// Get single node
-				var node Node
-				var created, modified int64
-				err := db.QueryRow(`
-					SELECT id, type, COALESCE(parent_id, ''), path, title, content,
-					       COALESCE(slug, ''), mime_type, created_at, modified_at
-					FROM nodes
-					WHERE id = ? AND site_id = ? AND deleted_at IS NULL
-				`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.ParentID, &node.Path,
-					&node.Title, &node.Content, &node.Slug, &node.MimeType, &created, &modified)
-
-				if err != nil {
-					w.WriteHeader(http.StatusNotFound)
-					json.NewEncoder(w).Encode(map[string]string{"error": "node not found"})
-					return
-				}
-
-				node.CreatedAt = time.Unix(created, 0)
-				node.ModifiedAt = time.Unix(modified, 0)
-				node.SiteID = siteID
-				json.NewEncoder(w).Encode(node)
-			} else if r.Method == "PUT" {
-				// Update node
-				var node Node
-				json.NewDecoder(r.Body).Decode(&node)
-				now := time.Now().Unix()
-
-				_, err := db.Exec(`
-					UPDATE nodes SET title = ?, content = ?, modified_at = ?
-					WHERE id = ? AND site_id = ?
-				`, node.Title, node.Content, now, nodeID, siteID)
-
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-					return
-				}
-
-				// Create new version
-				var versionNumber int
-				db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM versions WHERE node_id = ?`, nodeID).Scan(&versionNumber)
-				versionNumber++
-
-				versionID := fmt.Sprintf("v_%d", time.Now().UnixNano())
-				db.Exec(`UPDATE versions SET is_current = 0 WHERE node_id = ?`, nodeID)
-				db.Exec(`
-					INSERT INTO versions (id, node_id, version_number, content, title, status, created_at, modified_at, is_current)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				`, versionID, nodeID, versionNumber, node.Content, node.Title, "draft", now, now, 1)
-
-				node.ID = nodeID
-				node.SiteID = siteID
-				node.ModifiedAt = time.Unix(now, 0)
-				json.NewEncoder(w).Encode(node)
-			} else if r.Method == "DELETE" {
-				now := time.Now().Unix()
-				_, err := db.Exec(`UPDATE nodes SET deleted_at = ? WHERE id = ? AND site_id = ?`, now, nodeID, siteID)
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-					return
-				}
-				w.WriteHeader(http.StatusNoContent)
-			}
-		} else if len(parts) > 6 {
-			// Sub-resources: /api/sites/site_123/nodes/node_456/versions or /publish etc
-			nodeID := parts[5]
-			action := parts[6]
-
-			switch action {
-			case "versions":
-				if len(parts) > 7 && parts[7] == "rollback" {
-					// Rollback to specific version
-					handleVersionRollback(w, r, siteID, nodeID, parts[7])
-				} else {
-					handleNodeVersions(w, r, siteID, nodeID)
-				}
-			case "publish":
-				handleNodePublish(w, r, siteID, nodeID)
-			case "tags":
-				handleNodeTagsNested(w, r, siteID, nodeID)
-			case "media":
-				handleNodeMedia(w, r, siteID, nodeID)
-			case "backlinks":
-				handleNodeBacklinks(w, r, siteID, nodeID)
-			case "references":
-				handleNodeReferences(w, r, siteID, nodeID)
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}
-	}
-}
-
-// Handle node versions for a specific site/node
 func handleNodeVersions(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1221,88 +1087,6 @@ ORDER BY created_at DESC
 	})
 }
 
-// Handle preview route - renders node as HTML
-func handlePreview(w http.ResponseWriter, r *http.Request) {
-	// Extract path like /preview/site_123/node_456
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 4 {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid preview URL"))
-		return
-	}
-
-	siteID := parts[2]
-	nodeID := parts[3]
-
-	// Get node
-	var node Node
-	var created, modified int64
-	err := db.QueryRow(`
-SELECT id, type, title, content, created_at, modified_at
-FROM nodes
-WHERE id = ? AND site_id = ? AND deleted_at IS NULL
-`, nodeID, siteID).Scan(&node.ID, &node.Type, &node.Title, &node.Content, &created, &modified)
-
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Node not found"))
-		return
-	}
-
-	node.CreatedAt = time.Unix(created, 0)
-	node.ModifiedAt = time.Unix(modified, 0)
-
-	// Get site
-	var siteName string
-	db.QueryRow(`SELECT name FROM sites WHERE id = ?`, siteID).Scan(&siteName)
-
-	// Render HTML
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>%s - %s</title>
-<script src="tailwind.css.js"></script>
-<style>
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-.content { max-width: 800px; margin: 0 auto; padding: 2rem; }
-.content h1 { font-size: 2.5rem; font-weight: bold; margin-bottom: 1rem; }
-.content h2 { font-size: 2rem; font-weight: bold; margin-top: 2rem; margin-bottom: 1rem; }
-.content h3 { font-size: 1.5rem; font-weight: bold; margin-top: 1.5rem; margin-bottom: 0.75rem; }
-.content p { margin-bottom: 1rem; line-height: 1.7; }
-.content code { background: #f3f4f6; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; }
-.content pre { background: #1f2937; color: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
-.content ul, .content ol { margin-left: 1.5rem; margin-bottom: 1rem; }
-.content li { margin-bottom: 0.5rem; }
-.content a { color: #4f46e5; text-decoration: underline; }
-</style>
-</head>
-<body class="bg-slate-50">
-<div class="content">
-<div class="text-sm text-slate-500 mb-4">
-<a href="/" class="hover:text-slate-700">← Back to Editor</a>
-</div>
-<article class="bg-white rounded-lg shadow-sm p-8">
-<header class="mb-8 border-b pb-4">
-<h1 class="text-slate-900">%s</h1>
-<div class="text-sm text-slate-500 mt-2">
-<span>%s</span> • 
-<span>%s</span>
-</div>
-</header>
-<div class="content prose prose-slate">
-%s
-</div>
-</article>
-</div>
-</body>
-</html>`, node.Title, siteName, node.Title, siteName, node.CreatedAt.Format("January 2, 2006"), markdownToHTML(node.Content))
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
-}
-
 // Handle version rollback
 func handleVersionRollback(w http.ResponseWriter, r *http.Request, siteID, nodeID, versionID string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -1427,4 +1211,136 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		"url":      "/media/" + filename,
 		"filename": header.Filename,
 	})
+}
+
+// === API Handlers - Sites ===
+
+func handleSites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "GET" {
+		rows, err := db.Query(`SELECT id, name, description, type, created_at, modified_at FROM sites ORDER BY name`)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		var sites []Site
+		for rows.Next() {
+			var s Site
+			var created, modified int64
+			rows.Scan(&s.ID, &s.Name, &s.Description, &s.Type, &created, &modified)
+			s.CreatedAt = time.Unix(created, 0)
+			s.ModifiedAt = time.Unix(modified, 0)
+			sites = append(sites, s)
+		}
+		json.NewEncoder(w).Encode(sites)
+	} else if r.Method == "POST" {
+		var site Site
+		json.NewDecoder(r.Body).Decode(&site)
+		site.ID = fmt.Sprintf("site_%d", time.Now().UnixNano())
+		now := time.Now().Unix()
+
+		_, err := db.Exec(`INSERT INTO sites (id, name, description, type, created_at, modified_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			site.ID, site.Name, site.Description, site.Type, now, now)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		site.CreatedAt = time.Unix(now, 0)
+		site.ModifiedAt = time.Unix(now, 0)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(site)
+	}
+}
+
+func handleSitesDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	siteID := strings.TrimPrefix(r.URL.Path, "/api/sites/")
+
+	if r.Method == "GET" {
+		var site Site
+		var created, modified int64
+		err := db.QueryRow(`SELECT id, name, description, type, created_at, modified_at FROM sites WHERE id = ?`, siteID).
+			Scan(&site.ID, &site.Name, &site.Description, &site.Type, &created, &modified)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		site.CreatedAt = time.Unix(created, 0)
+		site.ModifiedAt = time.Unix(modified, 0)
+		json.NewEncoder(w).Encode(site)
+	} else if r.Method == "PUT" {
+		var site Site
+		json.NewDecoder(r.Body).Decode(&site)
+		now := time.Now().Unix()
+
+		_, err := db.Exec(`UPDATE sites SET name = ?, description = ?, type = ?, modified_at = ? WHERE id = ?`,
+			site.Name, site.Description, site.Type, now, siteID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(site)
+	} else if r.Method == "DELETE" {
+		_, err := db.Exec(`DELETE FROM sites WHERE id = ?`, siteID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// === API Handlers - Preview ===
+
+func handlePreview(w http.ResponseWriter, r *http.Request) {
+	// Extract site and node from path: /preview/site_id/node_id
+	path := strings.TrimPrefix(r.URL.Path, "/preview/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid preview path"))
+		return
+	}
+
+	siteID := parts[0]
+	nodeID := parts[1]
+
+	// Get node
+	var node Node
+	var created, modified int64
+	err := db.QueryRow(`SELECT id, type, path, title, content, mime_type, created_at, modified_at FROM nodes WHERE id = ? AND deleted_at IS NULL`, nodeID).
+		Scan(&node.ID, &node.Type, &node.Path, &node.Title, &node.Content, &node.MimeType, &created, &modified)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Node not found"))
+		return
+	}
+
+	// Render as HTML
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>%s</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; max-width: 800px; margin: 0 auto; padding: 20px; }
+h1 { border-bottom: 2px solid #333; }
+</style>
+</head>
+<body>
+<h1>%s</h1>
+<div>%s</div>
+<p><small>Preview - Site: %s</small></p>
+</body>
+</html>`, node.Title, node.Title, node.Content, siteID)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }

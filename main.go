@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -96,6 +97,10 @@ func codexCommand() {
 		}
 		storage := fsstorage.New(repoPath)
 		repo := codexpkg.NewRepository(storage, repoPath)
+		// Attach repository to any plugins that implement RepositoryAware
+		if err := plugins.GetRegistry().AttachRepositoryToAll(repo); err != nil {
+			log.Printf("warning: failed to attach repository to plugins: %v", err)
+		}
 		st, err := repo.Status()
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
@@ -331,6 +336,13 @@ func serve() {
 	// Load enabled plugins from DB and register them at runtime
 	plugins.LoadEnabledPluginsFromDB(db)
 
+	// Initialize Codex repository and attach to plugins
+	storage := fsstorage.New(".")
+	repo := codexpkg.NewRepository(storage, ".")
+	if err := plugins.GetRegistry().AttachRepositoryToAll(repo); err != nil {
+		log.Printf("warning: failed to attach repository to plugins: %v", err)
+	}
+
 	mux := setupRoutes()
 	addr := ":" + port
 	fmt.Printf("✓ Veil running at http://localhost:%s\n", port)
@@ -360,6 +372,13 @@ func gui() {
 	plugins.PopulatePluginsRegistry(db)
 	// Load enabled plugins from DB and register them at runtime
 	plugins.LoadEnabledPluginsFromDB(db)
+
+	// Initialize Codex repository and attach to plugins
+	storage := fsstorage.New(".")
+	repo := codexpkg.NewRepository(storage, ".")
+	if err := plugins.GetRegistry().AttachRepositoryToAll(repo); err != nil {
+		log.Printf("warning: failed to attach repository to plugins: %v", err)
+	}
 
 	mux := setupRoutes()
 	go func() {
@@ -510,19 +529,136 @@ func listNodes() {
 
 func publishNode() {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: veil publish <node-id>")
+		fmt.Println("Usage: veil publish <node-id> [--channel <channel-id>]")
 		return
 	}
 	nodeID := os.Args[2]
-	fmt.Printf("Published node: %s\n", nodeID)
+
+	// Optional flags
+	channelID := ""
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--channel":
+			if i+1 < len(os.Args) {
+				channelID = os.Args[i+1]
+			}
+		}
+	}
+
+	// Open DB and enqueue publish job
+	database, err := sql.Open("sqlite", "./veil.db")
+	if err != nil {
+		fmt.Printf("failed to open DB: %v\n", err)
+		return
+	}
+	defer database.Close()
+
+	// Ensure plugins package has DB handle
+	plugins.SetDB(database)
+
+	// If channelID not provided, pick an active one
+	if channelID == "" {
+		row := database.QueryRow(`SELECT id FROM publishing_channels WHERE active = 1 LIMIT 1`)
+		var cid string
+		if err := row.Scan(&cid); err == nil {
+			channelID = cid
+		}
+	}
+	if channelID == "" {
+		fmt.Println("No active publishing channel found. Create one via the web UI or API.")
+		return
+	}
+
+	job := plugins.PublishJob{NodeID: nodeID, ChannelID: channelID}
+	j, err := plugins.QueuePublishJob(job)
+	if err != nil {
+		fmt.Printf("failed to queue publish job: %v\n", err)
+		return
+	}
+	fmt.Printf("Enqueued publish job: %s (node: %s)\n", j.ID, nodeID)
 }
 
 func exportNode() {
-	if len(os.Args) < 4 {
-		fmt.Println("Usage: veil export <node-id> <type>")
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: veil export <node-id> <type> OR: veil export commit <hash> [--format zip|jsonld] [--out <file>]")
 		return
 	}
+	// Special subcommand: export commit
+	if os.Args[2] == "commit" {
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: veil export commit <hash> [--format zip|jsonld] [--out <file>]")
+			return
+		}
+		hash := os.Args[3]
+		format := "zip"
+		outPath := ""
+		for i := 4; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--format":
+				if i+1 < len(os.Args) {
+					format = os.Args[i+1]
+					i++
+				}
+			case "--out":
+				if i+1 < len(os.Args) {
+					outPath = os.Args[i+1]
+					i++
+				}
+			}
+		}
+
+		repo := codexpkg.NewRepository(fsstorage.New("."), ".")
+		// Attach repository to any plugins that implement RepositoryAware
+		if err := plugins.GetRegistry().AttachRepositoryToAll(repo); err != nil {
+			log.Printf("warning: failed to attach repository to plugins: %v", err)
+		}
+		var writer io.Writer
+		var f *os.File
+		if outPath != "" {
+			var err error
+			f, err = os.Create(outPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to create output file: %v\n", err)
+				return
+			}
+			defer f.Close()
+			writer = f
+		} else {
+			writer = os.Stdout
+		}
+
+		switch format {
+		case "zip":
+			if err := codexpkg.ExportCommitToZip(writer, repo, hash); err != nil {
+				fmt.Fprintf(os.Stderr, "export error: %v\n", err)
+				return
+			}
+		case "jsonld":
+			b, err := codexpkg.ExportCommitToJSONLD(repo, hash)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "export error: %v\n", err)
+				return
+			}
+			if _, err := writer.Write(b); err != nil {
+				fmt.Fprintf(os.Stderr, "write error: %v\n", err)
+				return
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "unsupported export format: %s\n", format)
+			return
+		}
+
+		if outPath != "" {
+			fmt.Fprintf(os.Stderr, "Exported commit %s -> %s\n", hash, outPath)
+		}
+		return
+	}
+
+	// legacy: node export
 	nodeID := os.Args[2]
-	exportType := os.Args[3]
+	exportType := ""
+	if len(os.Args) >= 4 {
+		exportType = os.Args[3]
+	}
 	fmt.Printf("Exported node %s as %s\n", nodeID, exportType)
 }

@@ -1,9 +1,14 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"time"
+	"veil/pkg/codex"
 )
 
 // === Shader Demo Editor Plugin ===
@@ -11,6 +16,7 @@ import (
 type ShaderPlugin struct {
 	name    string
 	version string
+	repo    *codex.Repository
 }
 
 func NewShaderPlugin() *ShaderPlugin {
@@ -54,6 +60,12 @@ func (sp *ShaderPlugin) Execute(ctx context.Context, action string, payload inte
 }
 
 func (sp *ShaderPlugin) Shutdown() error {
+	return nil
+}
+
+// AttachRepository implements RepositoryAware to receive codex repository
+func (sp *ShaderPlugin) AttachRepository(r *codex.Repository) error {
+	sp.repo = r
 	return nil
 }
 
@@ -323,34 +335,68 @@ func (sp *ShaderPlugin) exportShader(ctx context.Context, payload interface{}) (
 	fragmentShader := req["fragmentShader"].(string)
 	format := req["format"].(string)
 
+	var data interface{}
+	var mimeType string
+	var filenameOut string
+
 	switch format {
 	case "html":
-		html := sp.generateShaderHTML("Exported Shader", "fragment", fragmentShader)
-		return map[string]interface{}{
-			"data":     html,
-			"mimeType": "text/html",
-			"filename": "shader.html",
-		}, nil
+		data = sp.generateShaderHTML("Exported Shader", "fragment", fragmentShader)
+		mimeType = "text/html"
+		filenameOut = "shader.html"
 	case "json":
 		vertexShader, _ := req["vertexShader"].(string)
 		shaderData := map[string]interface{}{
 			"vertexShader":   vertexShader,
 			"fragmentShader": fragmentShader,
 		}
-		return map[string]interface{}{
-			"data":     shaderData,
-			"mimeType": "application/json",
-			"filename": "shader.json",
-		}, nil
+		data = shaderData
+		mimeType = "application/json"
+		filenameOut = "shader.json"
 	case "glsl":
 		vertexShader, _ := req["vertexShader"].(string)
 		glsl := fmt.Sprintf("// Vertex Shader\n%s\n\n// Fragment Shader\n%s", vertexShader, fragmentShader)
-		return map[string]interface{}{
-			"data":     glsl,
-			"mimeType": "text/plain",
-			"filename": "shader.glsl",
-		}, nil
+		data = glsl
+		mimeType = "text/plain"
+		filenameOut = "shader.glsl"
 	default:
 		return nil, fmt.Errorf("unsupported export format: %s", format)
 	}
+
+	resp := map[string]interface{}{
+		"data":     data,
+		"mimeType": mimeType,
+		"filename": filenameOut,
+	}
+
+	// If repository attached, stream the exported data into codex and create a commit
+	if sp.repo != nil {
+		var rdr io.Reader
+		switch v := data.(type) {
+		case string:
+			rdr = strings.NewReader(v)
+		case []byte:
+			rdr = bytes.NewReader(v)
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				rdr = bytes.NewReader(b)
+			} else {
+				rdr = strings.NewReader(fmt.Sprintf("%v", v))
+			}
+		}
+
+		if objHash, err := sp.repo.PutObjectStreamWithFilename(rdr, mimeType, filenameOut); err == nil {
+			commit := &codex.Commit{
+				Parents:   []string{},
+				Author:    "shader_plugin",
+				Timestamp: time.Now().UTC(),
+				Message:   fmt.Sprintf("Exported shader: %s", filenameOut),
+				Objects:   []string{objHash},
+			}
+			_ = sp.repo.PutCommit(commit)
+			resp["codex_object"] = objHash
+		}
+	}
+
+	return resp, nil
 }

@@ -1,0 +1,5 @@
+2025/12/16 21:42:01 Failed to register plugin media: plugin validation failed: ffmpeg not found in PATH
+2025/12/16 21:42:01 Registered plugin from DB:  (svg)
+2025/12/16 21:42:01 Registered plugin from DB:  (reminder)
+✓ Veil running at http://localhost:8080
+✓ Plugins initialized: Git, IPFS, Namecheap, Media, Pixospritz

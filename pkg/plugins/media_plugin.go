@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+	"veil/pkg/codex"
 )
 
 // === Media Pipeline Plugin ===
@@ -17,6 +19,7 @@ type MediaPlugin struct {
 	version    string
 	outputDir  string
 	ffmpegPath string
+	repo       *codex.Repository
 }
 
 func NewMediaPlugin(outputDir string) *MediaPlugin {
@@ -85,6 +88,12 @@ func (mp *MediaPlugin) Shutdown() error {
 	return nil
 }
 
+// AttachRepository implements RepositoryAware (optional) to receive the codex Repository
+func (mp *MediaPlugin) AttachRepository(r *codex.Repository) error {
+	mp.repo = r
+	return nil
+}
+
 // Actions
 
 type EncodeVideoRequest struct {
@@ -146,11 +155,33 @@ func (mp *MediaPlugin) encodeVideo(ctx context.Context, payload interface{}) (in
 	}
 
 	// Store record
-	now := int64(0)
+	now := time.Now().Unix()
 	db.Exec(`
 		INSERT INTO media_conversions (id, input_path, output_path, format, quality, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, fmt.Sprintf("conv_%d", now), inputPath, outputPath, format, quality, now)
+
+	// If repository attached, stream the output into codex and create a commit
+	if mp.repo != nil {
+		f, err := os.Open(outputPath)
+		if err == nil {
+			defer f.Close()
+			contentType := "video/mp4"
+			if format != "mp4" {
+				contentType = fmt.Sprintf("video/%s", format)
+			}
+			if objHash, err2 := mp.repo.PutObjectStreamWithFilename(f, contentType, filepath.Base(outputPath)); err2 == nil {
+				commit := &codex.Commit{
+					Parents:   []string{},
+					Author:    "media_plugin",
+					Timestamp: time.Now().UTC(),
+					Message:   fmt.Sprintf("Encoded media: %s", filepath.Base(outputPath)),
+					Objects:   []string{objHash},
+				}
+				_ = mp.repo.PutCommit(commit)
+			}
+		}
+	}
 
 	return map[string]interface{}{
 		"status":      "encoded",
@@ -196,6 +227,30 @@ func (mp *MediaPlugin) encodeAudio(ctx context.Context, payload interface{}) (in
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("audio encoding failed: %v", err)
+	}
+
+	// If repository attached, stream the audio output into codex and create a commit
+	if mp.repo != nil {
+		f, err := os.Open(outputPath)
+		if err == nil {
+			defer f.Close()
+			contentType := "audio/mpeg"
+			if format == "ogg" {
+				contentType = "audio/ogg"
+			} else if format == "flac" {
+				contentType = "audio/flac"
+			}
+			if objHash, err2 := mp.repo.PutObjectStreamWithFilename(f, contentType, filepath.Base(outputPath)); err2 == nil {
+				commit := &codex.Commit{
+					Parents:   []string{},
+					Author:    "media_plugin",
+					Timestamp: time.Now().UTC(),
+					Message:   fmt.Sprintf("Encoded audio: %s", filepath.Base(outputPath)),
+					Objects:   []string{objHash},
+				}
+				_ = mp.repo.PutCommit(commit)
+			}
+		}
 	}
 
 	return map[string]interface{}{
@@ -247,6 +302,24 @@ func (mp *MediaPlugin) generateThumbnail(ctx context.Context, payload interface{
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("thumbnail generation failed: %v", err)
+	}
+
+	// If repository attached, store thumbnail in codex
+	if mp.repo != nil {
+		f, err := os.Open(outputPath)
+		if err == nil {
+			defer f.Close()
+			if objHash, err2 := mp.repo.PutObjectStreamWithFilename(f, "image/jpeg", filepath.Base(outputPath)); err2 == nil {
+				commit := &codex.Commit{
+					Parents:   []string{},
+					Author:    "media_plugin",
+					Timestamp: time.Now().UTC(),
+					Message:   fmt.Sprintf("Generated thumbnail: %s", filepath.Base(outputPath)),
+					Objects:   []string{objHash},
+				}
+				_ = mp.repo.PutCommit(commit)
+			}
+		}
 	}
 
 	return map[string]interface{}{

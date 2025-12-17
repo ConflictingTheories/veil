@@ -213,20 +213,35 @@ func HandlePublishJob(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		var job PublishJob
 		json.NewDecoder(r.Body).Decode(&job)
-		job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
-		job.CreatedAt = time.Now().Unix()
-		job.Status = "queued"
-
-		db.Exec(`
-			INSERT INTO publish_jobs (id, node_id, version_id, channel_id, status, progress, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, job.ID, job.NodeID, job.VersionID, job.ChannelID, job.Status, 0, job.CreatedAt)
-
-		go processPublishJob(job)
-
+		j, err := QueuePublishJob(job)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(job)
+		json.NewEncoder(w).Encode(j)
 	}
+}
+
+// QueuePublishJob enqueues a publish job into the DB and starts processing it asynchronously.
+func QueuePublishJob(job PublishJob) (PublishJob, error) {
+	if db == nil {
+		return job, fmt.Errorf("plugins DB not configured")
+	}
+	job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
+	job.CreatedAt = time.Now().Unix()
+	job.Status = "queued"
+
+	_, err := db.Exec(`
+		INSERT INTO publish_jobs (id, node_id, version_id, channel_id, status, progress, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, job.ID, job.NodeID, job.VersionID, job.ChannelID, job.Status, 0, job.CreatedAt)
+	if err != nil {
+		return job, err
+	}
+	go processPublishJob(job)
+	return job, nil
 }
 
 // Instantiate known plugins by slug. Returns nil if the slug is unknown or instantiation fails.
@@ -327,7 +342,7 @@ func LoadEnabledPluginsFromDB(db *sql.DB) {
 			log.Printf("Failed to initialize plugin %s: %v\n", slug, err)
 			continue
 		}
-		if err := pluginRegistry.Register(p); err != nil {
+		if err := GetRegistry().Register(p); err != nil {
 			log.Printf("Failed to register plugin %s: %v\n", slug, err)
 			continue
 		}

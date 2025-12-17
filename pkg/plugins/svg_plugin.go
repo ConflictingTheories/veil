@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"veil/pkg/codex"
 )
 
 // === SVG Drawing Plugin ===
@@ -11,6 +12,7 @@ import (
 type SVGPlugin struct {
 	name    string
 	version string
+	repo    *codex.Repository
 }
 
 func NewSVGPlugin() *SVGPlugin {
@@ -54,6 +56,12 @@ func (sp *SVGPlugin) Execute(ctx context.Context, action string, payload interfa
 }
 
 func (sp *SVGPlugin) Shutdown() error {
+	return nil
+}
+
+// AttachRepository implements RepositoryAware to receive codex repository
+func (sp *SVGPlugin) AttachRepository(r *codex.Repository) error {
+	sp.repo = r
 	return nil
 }
 

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+	"veil/pkg/codex"
 )
 
 // === IPFS Plugin ===
@@ -14,6 +16,7 @@ type IPFSPlugin struct {
 	name       string
 	version    string
 	gatewayURL string
+	repo       *codex.Repository
 }
 
 func NewIPFSPlugin(gatewayURL string) *IPFSPlugin {
@@ -83,6 +86,12 @@ func (ip *IPFSPlugin) Execute(ctx context.Context, action string, payload interf
 }
 
 func (ip *IPFSPlugin) Shutdown() error {
+	return nil
+}
+
+// AttachRepository implements RepositoryAware to receive codex repository
+func (ip *IPFSPlugin) AttachRepository(r *codex.Repository) error {
+	ip.repo = r
 	return nil
 }
 
@@ -212,6 +221,22 @@ func (ip *IPFSPlugin) publishVersion(ctx context.Context, payload interface{}) (
 		INSERT INTO ipfs_publications (id, version_id, node_id, ipfs_hash, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, fmt.Sprintf("pub_%d", now), versionID, nodeID, hash, now)
+
+	// Also register the exported content in codex if a repository is attached
+	if ip.repo != nil {
+		rdr := strings.NewReader(content)
+		objHash, err2 := ip.repo.PutObjectStreamWithFilename(rdr, "text/markdown", version.Title+".md")
+		if err2 == nil {
+			commit := &codex.Commit{
+				Parents:   []string{},
+				Author:    "ipfs_plugin",
+				Timestamp: time.Now().UTC(),
+				Message:   fmt.Sprintf("IPFS publish: %s", versionID),
+				Objects:   []string{objHash},
+			}
+			_ = ip.repo.PutCommit(commit)
+		}
+	}
 
 	return map[string]interface{}{
 		"hash":      hash,

@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"strings"
+	"time"
+	"veil/pkg/codex"
 )
 
 // === Pixospritz Game Engine Plugin ===
@@ -16,6 +19,7 @@ type PixospritzPlugin struct {
 	version       string
 	serverURL     string
 	localGamePath string
+	repo          *codex.Repository
 }
 
 func NewPixospritzPlugin(serverURL string) *PixospritzPlugin {
@@ -88,6 +92,12 @@ func (pp *PixospritzPlugin) Shutdown() error {
 	return nil
 }
 
+// AttachRepository implements RepositoryAware to receive codex repository
+func (pp *PixospritzPlugin) AttachRepository(r *codex.Repository) error {
+	pp.repo = r
+	return nil
+}
+
 // Game types
 
 type GameEmbed struct {
@@ -143,12 +153,30 @@ func (pp *PixospritzPlugin) embedGame(ctx context.Context, payload interface{}) 
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, embedID, nodeID, gameID, title, description, embedCode, now)
 
-	return map[string]interface{}{
+	resp := map[string]interface{}{
 		"id":         embedID,
 		"embed_code": embedCode,
 		"game_id":    gameID,
 		"node_id":    nodeID,
-	}, nil
+	}
+
+	// Register embed HTML in codex when repository attached
+	if pp.repo != nil {
+		rdr := strings.NewReader(embedCode)
+		if objHash, err := pp.repo.PutObjectStreamWithFilename(rdr, "text/html", fmt.Sprintf("embed_%s.html", embedID)); err == nil {
+			commit := &codex.Commit{
+				Parents:   []string{},
+				Author:    "pixospritz_plugin",
+				Timestamp: time.Now().UTC(),
+				Message:   fmt.Sprintf("Embed game: %s", embedID),
+				Objects:   []string{objHash},
+			}
+			_ = pp.repo.PutCommit(commit)
+			resp["codex_object"] = objHash
+		}
+	}
+
+	return resp, nil
 }
 
 type GetScoresRequest struct {
@@ -286,6 +314,8 @@ func (pp *PixospritzPlugin) getLeaderboard(ctx context.Context, payload interfac
 	var leaderboard []map[string]interface{}
 	for i := 0; rows.Next(); i++ {
 		var playerID string
+
+		// Register embed HTML in codex when repository attached
 		var score int
 		var timestamp int64
 		rows.Scan(&playerID, &score, &timestamp)

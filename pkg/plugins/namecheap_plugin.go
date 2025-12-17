@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"veil/pkg/codex"
 )
 
 // === Namecheap DNS Plugin ===
@@ -18,6 +19,7 @@ type NamecheapPlugin struct {
 	apiKey   string
 	username string
 	clientIP string
+	repo     *codex.Repository
 }
 
 func NewNamecheapPlugin() *NamecheapPlugin {
@@ -92,6 +94,12 @@ func (nc *NamecheapPlugin) Execute(ctx context.Context, action string, payload i
 }
 
 func (nc *NamecheapPlugin) Shutdown() error {
+	return nil
+}
+
+// AttachRepository implements RepositoryAware to receive codex repository
+func (nc *NamecheapPlugin) AttachRepository(r *codex.Repository) error {
+	nc.repo = r
 	return nil
 }
 

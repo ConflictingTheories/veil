@@ -16,6 +16,7 @@ Everything in Veil has a **URI** (`veil://site/type/slug`), making your content 
 
 ### Core Capabilities
 
+- **Codex Knowledge Graph** - Git-like version control for all content with branching, merging, and history
 - **Multi-Site Management** - Create unlimited sites (portfolios, blogs, projects)
 - **Rich Content Types** - Notes, pages, posts, canvases, shader demos, code snippets, media
 - **Version Control** - Built-in versioning with publish/rollback capabilities
@@ -147,6 +148,30 @@ Examples:
 - `veil://projects/canvas/logo-design`
 
 You can also create custom URI aliases for any content.
+
+## 🧠 Codex Knowledge Graph
+
+Veil's core is powered by **Codex**, a Git-like knowledge graph that provides version control for all content:
+
+### Features
+
+- **Content-Addressed Storage** - Every piece of content is stored by its hash
+- **Git-like Versioning** - Commits, branches, merges, and history tracking
+- **Universal Data Types** - Supports text, binary, JSON, media, and custom formats
+- **Efficient Storage** - Streaming support for large files and media
+- **Conflict Resolution** - Three-way merges with conflict detection
+- **Export Formats** - Export commits as ZIP or JSON-LD
+
+### API Endpoints
+
+- `GET /api/codex/status` - Repository status
+- `POST /api/codex/commit` - Create new commit
+- `GET /api/codex/commits` - List commits
+- `GET /api/codex/diff` - Compare commits
+- `POST /api/codex/merge` - Merge branches
+- `GET /api/codex/export` - Export commit data
+
+All content in Veil is automatically versioned through Codex, providing a complete audit trail and enabling advanced features like branching for drafts and collaborative editing.
 
 ## 📤 Export & Publishing
 

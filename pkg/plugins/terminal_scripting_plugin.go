@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"veil/pkg/codex"
 )
 
 // TerminalScriptingPlugin handles shell script execution, package installation, and code generation
@@ -18,6 +19,7 @@ type TerminalScriptingPlugin struct {
 	version         string
 	allowedCommands map[string]bool
 	safeMode        bool
+	repo            *codex.Repository
 }
 
 // NewTerminalScriptingPlugin creates a new terminal scripting plugin
@@ -103,6 +105,12 @@ func (tsp *TerminalScriptingPlugin) Validate() error {
 // Shutdown cleans up plugin resources
 func (tsp *TerminalScriptingPlugin) Shutdown() error {
 	log.Printf("Terminal scripting plugin shutting down")
+	return nil
+}
+
+// AttachRepository implements RepositoryAware to receive codex repository
+func (tsp *TerminalScriptingPlugin) AttachRepository(r *codex.Repository) error {
+	tsp.repo = r
 	return nil
 }
 

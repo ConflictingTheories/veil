@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -26,27 +27,52 @@ func handleCodexStatus(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/codex/object?hash=...
 func handleCodexObject(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	h := r.URL.Query().Get("hash")
-	if h == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "hash required"})
-		return
-	}
 	fs := fsstorage.New(".")
-	b, err := fs.GetObject(h)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
+	switch r.Method {
+	case "GET":
+		h := r.URL.Query().Get("hash")
+		if h == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "hash required"})
+			return
+		}
+		rc, ct, err := fs.GetObjectStream(h)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		defer rc.Close()
+		// If JSON, attempt to decode and pretty-print
+		if ct == "application/json" {
+			var out interface{}
+			if err := json.NewDecoder(rc).Decode(&out); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(out)
+				return
+			}
+			// fallthrough to raw
+		}
+		w.Header().Set("Content-Type", ct)
+		// stream raw bytes
+		_, _ = io.Copy(w, rc)
+	case "POST":
+		// Upload raw body as object
+		contentType := r.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		hash, err := fs.PutObjectStream(r.Body, contentType)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"status": "created", "hash": hash})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	var out interface{}
-	if err := json.Unmarshal(b, &out); err != nil {
-		// Not JSON — return raw
-		json.NewEncoder(w).Encode(map[string]string{"raw": string(b)})
-		return
-	}
-	json.NewEncoder(w).Encode(out)
 }
 
 // POST /api/codex/query  { prefix: "" }
@@ -152,6 +178,75 @@ func handleCodexDiff(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(diff)
 }
 
+// POST /api/codex/merge  { base:, ours:, theirs:, author:, message: }
+func handleCodexMerge(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var req struct {
+		Base    string `json:"base"`
+		Ours    string `json:"ours"`
+		Theirs  string `json:"theirs"`
+		Author  string `json:"author"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload"})
+		return
+	}
+	repo := codexpkg.NewRepository(fsstorage.New("."), ".")
+	mcommit, conflicts, err := repo.MergeCommits(req.Base, req.Ours, req.Theirs, req.Author, req.Message)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if len(conflicts) > 0 {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"conflicts": conflicts})
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"hash": mcommit.Hash})
+}
+
+// GET /api/codex/export?hash=&format=zip|jsonld
+func handleCodexExport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	h := q.Get("hash")
+	if h == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "hash required"})
+		return
+	}
+	format := q.Get("format")
+	if format == "" {
+		format = "zip"
+	}
+	repo := codexpkg.NewRepository(fsstorage.New("."), ".")
+	switch format {
+	case "zip":
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", "attachment; filename=codex-"+h+".zip")
+		if err := codexpkg.ExportCommitToZip(w, repo, h); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	case "jsonld":
+		w.Header().Set("Content-Type", "application/ld+json")
+		b, err := codexpkg.ExportCommitToJSONLD(repo, h)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Write(b)
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unsupported format"})
+	}
+}
+
 func registerCodexHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/codex/status", handleCodexStatus)
 	mux.HandleFunc("/api/codex/object", handleCodexObject)
@@ -160,4 +255,6 @@ func registerCodexHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/codex/commits", handleCodexCommitsList)
 	mux.HandleFunc("/api/codex/commit/get", handleCodexCommitGet)
 	mux.HandleFunc("/api/codex/diff", handleCodexDiff)
+	mux.HandleFunc("/api/codex/merge", handleCodexMerge)
+	mux.HandleFunc("/api/codex/export", handleCodexExport)
 }

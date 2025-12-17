@@ -1,9 +1,12 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+	"veil/pkg/codex"
 )
 
 // === Todo System Plugin ===
@@ -11,6 +14,7 @@ import (
 type TodoPlugin struct {
 	name    string
 	version string
+	repo    *codex.Repository
 }
 
 func NewTodoPlugin() *TodoPlugin {
@@ -88,6 +92,12 @@ func (tp *TodoPlugin) Shutdown() error {
 	return nil
 }
 
+// AttachRepository implements RepositoryAware to receive codex repository
+func (tp *TodoPlugin) AttachRepository(r *codex.Repository) error {
+	tp.repo = r
+	return nil
+}
+
 // Actions
 
 type Todo struct {
@@ -142,6 +152,38 @@ func (tp *TodoPlugin) createTodo(ctx context.Context, payload interface{}) (inte
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create todo: %v", err)
+	}
+
+	// Store in Codex if repository is attached
+	if tp.repo != nil {
+		todoData := map[string]interface{}{
+			"id":          todo.ID,
+			"type":        "todo",
+			"node_id":     todo.NodeID,
+			"title":       todo.Title,
+			"description": todo.Description,
+			"status":      todo.Status,
+			"priority":    todo.Priority,
+			"due_date":    todo.DueDate,
+			"assigned_to": todo.AssignedTo,
+			"created_at":  todo.CreatedAt,
+			"modified_at": todo.ModifiedAt,
+			"urn":         fmt.Sprintf("urn:veil:todo:%s", todo.ID),
+		}
+
+		todoJSON, _ := json.Marshal(todoData)
+		hash, err := tp.repo.PutObjectStream(bytes.NewReader(todoJSON), "application/json")
+		if err == nil {
+			commit := &codex.Commit{
+				Hash:      "",
+				Parents:   []string{},
+				Author:    "Todo Plugin",
+				Timestamp: time.Unix(todo.CreatedAt, 0),
+				Message:   fmt.Sprintf("Create todo: %s", todo.Title),
+				Objects:   []string{hash},
+			}
+			_ = tp.repo.PutCommit(commit)
+		}
 	}
 
 	return todo, nil
