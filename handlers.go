@@ -157,7 +157,13 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	nodeID := r.URL.Query().Get("node_id")
 	now := time.Now().Unix()
 
-	db.Exec(`UPDATE versions SET status = 'published', published_at = ? WHERE node_id = ? AND is_current = 1`,
+	db.Exec(`
+	UPDATE 
+		versions 
+	SET 
+		status = 'published', 
+		published_at = ? 
+	WHERE node_id = ? AND is_current = 1`,
 		now, nodeID)
 
 	w.WriteHeader(http.StatusOK)
@@ -188,8 +194,18 @@ func handleReferences(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	sourceNodeID := r.URL.Query().Get("source")
 
-	rows, _ := db.Query(`SELECT id, source_node_id, target_node_id, link_type, link_text
-		FROM node_references WHERE source_node_id = ?`, sourceNodeID)
+	fmt.Printf("%s", sourceNodeID)
+	rows, _ := db.Query(`
+		SELECT 
+			id, 
+			source_node_id, 
+			target_node_id, 
+			link_type, 
+			link_text
+		FROM 
+			node_references 
+		WHERE source_node_id = ?`,
+		sourceNodeID)
 	defer rows.Close()
 
 	var references []Reference
@@ -534,9 +550,9 @@ func handleMediaUpload(w http.ResponseWriter, r *http.Request) {
 	fpath := filepath.Join("media", filename)
 	os.WriteFile(fpath, content, 0644)
 
-	_, err = db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, file_size, uploaded_by, created_at)
+	_, err = db.Exec(`INSERT INTO media (id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		mediaID, handler.Filename, "/media/"+filename, hashStr, handler.Header.Get("Content-Type"), len(content), "", now)
+		mediaID, handler.Filename, fpath, hashStr, handler.Header.Get("Content-Type"), len(content), "", now)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -554,43 +570,8 @@ func handleMedia(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	mediaID := r.URL.Query().Get("id")
 
-	// If no ID specified, list all media
-	if mediaID == "" {
-		rows, err := db.Query(`SELECT id, COALESCE(node_id, ''), filename, storage_url, COALESCE(checksum, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(uploaded_by, ''), created_at FROM media ORDER BY created_at DESC`)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		defer rows.Close()
-
-		var mediaList []map[string]interface{}
-		for rows.Next() {
-			var id, nodeID, filename, storageURL, checksum, mimeType, uploadedBy string
-			var fileSize int64
-			var createdAt int64
-			rows.Scan(&id, &nodeID, &filename, &storageURL, &checksum, &mimeType, &fileSize, &uploadedBy, &createdAt)
-			mediaList = append(mediaList, map[string]interface{}{
-				"id":          id,
-				"node_id":     nodeID,
-				"filename":    filename,
-				"url":         storageURL,
-				"checksum":    checksum,
-				"mime_type":   mimeType,
-				"size":        fileSize,
-				"uploaded_by": uploadedBy,
-				"created_at":  createdAt,
-			})
-		}
-		if mediaList == nil {
-			mediaList = []map[string]interface{}{}
-		}
-		json.NewEncoder(w).Encode(mediaList)
-		return
-	}
-
 	var media MediaFile
-	db.QueryRow(`SELECT id, COALESCE(node_id, ''), filename, storage_url, COALESCE(checksum, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(uploaded_by, ''), created_at FROM media WHERE id = ?`, mediaID).
+	db.QueryRow(`SELECT id, node_id, filename, storage_url, checksum, mime_type, size, uploaded_by, created_at FROM media WHERE id = ?`, mediaID).
 		Scan(&media.ID, &media.NodeID, &media.Filename, &media.StorageURL, &media.Checksum, &media.MimeType, &media.FileSize, &media.UploadedBy, &media.CreatedAt)
 
 	json.NewEncoder(w).Encode(media)
@@ -1166,48 +1147,6 @@ WHERE nr.target_node_id = ? AND n.deleted_at IS NULL
 // Handle node references (forward links) for a specific site/node
 func handleNodeReferences(w http.ResponseWriter, r *http.Request, siteID, nodeID string) {
 	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method == "POST" {
-		// Create a new reference
-		var req struct {
-			TargetNodeID string `json:"target_node_id"`
-			LinkText     string `json:"link_text"`
-			LinkType     string `json:"link_type"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-
-		if req.TargetNodeID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "target_node_id required"})
-			return
-		}
-
-		refID := fmt.Sprintf("ref_%d", time.Now().UnixNano())
-		now := time.Now().Unix()
-		linkType := req.LinkType
-		if linkType == "" {
-			linkType = "internal"
-		}
-
-		_, err := db.Exec(`
-			INSERT INTO node_references (id, source_node_id, target_node_id, link_type, link_text, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, refID, nodeID, req.TargetNodeID, linkType, req.LinkText, now)
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{
-			"id":     refID,
-			"status": "created",
-		})
-		return
-	}
-
 	rows, err := db.Query(`
 SELECT DISTINCT n.id, n.title, n.type, n.path, nr.link_type, nr.link_text
 FROM nodes n
@@ -1323,7 +1262,7 @@ WHERE id = ? AND site_id = ? AND deleted_at IS NULL
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>%s - %s</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="tailwind.css.js"></script>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 .content { max-width: 800px; margin: 0 auto; padding: 2rem; }

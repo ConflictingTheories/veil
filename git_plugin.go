@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +77,14 @@ func (gp *GitPlugin) Execute(ctx context.Context, action string, payload interfa
 		return gp.status(ctx)
 	case "sync":
 		return gp.sync(ctx, payload)
+	case "create_pr":
+		return gp.createPR(ctx, payload)
+	case "list_issues":
+		return gp.listIssues(ctx, payload)
+	case "create_issue":
+		return gp.createIssue(ctx, payload)
+	case "fork":
+		return gp.forkRepo(ctx, payload)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
@@ -255,4 +267,246 @@ func (gp *GitPlugin) sync(ctx context.Context, payload interface{}) (interface{}
 		"message": fmt.Sprintf("Auto-sync from Veil at %s", time.Now().Format(time.RFC3339)),
 		"branch":  "main",
 	})
+}
+
+// GitHub API Integration Methods
+
+type GitHubPRRequest struct {
+	Title string `json:"title"`
+	Head  string `json:"head"`
+	Base  string `json:"base"`
+	Body  string `json:"body"`
+	Draft bool   `json:"draft,omitempty"`
+}
+
+func (gp *GitPlugin) createPR(ctx context.Context, payload interface{}) (interface{}, error) {
+	req, ok := payload.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid payload")
+	}
+
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	repoURL, _ := loadConfig("git_repo_url")
+	if repoURL == nil {
+		return nil, fmt.Errorf("repository URL not configured")
+	}
+
+	// Extract owner/repo from URL
+	repoPath := strings.TrimPrefix(repoURL.(string), "https://github.com/")
+	parts := strings.Split(repoPath, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid GitHub repository URL")
+	}
+	owner, repo := parts[0], parts[1]
+
+	prData := map[string]interface{}{
+		"title": req["title"].(string),
+		"head":  req["head"].(string),
+		"base":  req["base"].(string),
+		"body":  req["body"].(string),
+	}
+
+	if draft, ok := req["draft"].(bool); ok {
+		prData["draft"] = draft
+	}
+
+	jsonData, _ := json.Marshal(prData)
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls", owner, repo)
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s", string(body))
+	}
+
+	var prResponse map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&prResponse)
+
+	return map[string]interface{}{
+		"status": "created",
+		"pr":     prResponse,
+	}, nil
+}
+
+type GitHubIssueRequest struct {
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Labels []string `json:"labels,omitempty"`
+}
+
+func (gp *GitPlugin) createIssue(ctx context.Context, payload interface{}) (interface{}, error) {
+	req, ok := payload.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid payload")
+	}
+
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	repoURL, _ := loadConfig("git_repo_url")
+	if repoURL == nil {
+		return nil, fmt.Errorf("repository URL not configured")
+	}
+
+	repoPath := strings.TrimPrefix(repoURL.(string), "https://github.com/")
+	parts := strings.Split(repoPath, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid GitHub repository URL")
+	}
+	owner, repo := parts[0], parts[1]
+
+	issueData := map[string]interface{}{
+		"title": req["title"].(string),
+		"body":  req["body"].(string),
+	}
+
+	if labels, ok := req["labels"].([]interface{}); ok {
+		var labelStrings []string
+		for _, label := range labels {
+			labelStrings = append(labelStrings, label.(string))
+		}
+		issueData["labels"] = labelStrings
+	}
+
+	jsonData, _ := json.Marshal(issueData)
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", owner, repo)
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s", string(body))
+	}
+
+	var issueResponse map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&issueResponse)
+
+	return map[string]interface{}{
+		"status": "created",
+		"issue":  issueResponse,
+	}, nil
+}
+
+func (gp *GitPlugin) listIssues(ctx context.Context, payload interface{}) (interface{}, error) {
+	req, ok := payload.(map[string]interface{})
+	if !ok {
+		req = map[string]interface{}{}
+	}
+
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	repoURL, _ := loadConfig("git_repo_url")
+	if repoURL == nil {
+		return nil, fmt.Errorf("repository URL not configured")
+	}
+
+	repoPath := strings.TrimPrefix(repoURL.(string), "https://github.com/")
+	parts := strings.Split(repoPath, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid GitHub repository URL")
+	}
+	owner, repo := parts[0], parts[1]
+
+	state := "open"
+	if s, ok := req["state"].(string); ok {
+		state = s
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues?state=%s", owner, repo, state)
+	httpReq, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s", string(body))
+	}
+
+	var issues []map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&issues)
+
+	return map[string]interface{}{
+		"issues": issues,
+	}, nil
+}
+
+func (gp *GitPlugin) forkRepo(ctx context.Context, payload interface{}) (interface{}, error) {
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	repoURL, _ := loadConfig("git_repo_url")
+	if repoURL == nil {
+		return nil, fmt.Errorf("repository URL not configured")
+	}
+
+	repoPath := strings.TrimPrefix(repoURL.(string), "https://github.com/")
+	parts := strings.Split(repoPath, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid GitHub repository URL")
+	}
+	owner, repo := parts[0], parts[1]
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/forks", owner, repo)
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, nil)
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 202 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s", string(body))
+	}
+
+	var forkResponse map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&forkResponse)
+
+	return map[string]interface{}{
+		"status": "forked",
+		"fork":   forkResponse,
+	}, nil
 }

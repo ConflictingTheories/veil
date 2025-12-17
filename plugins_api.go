@@ -222,6 +222,8 @@ func instantiatePluginBySlug(slug string) Plugin {
 		return NewTodoPlugin()
 	case "reminder":
 		return NewReminderPlugin()
+	case "terminal":
+		return NewTerminalScriptingPlugin()
 	default:
 		return nil
 	}
