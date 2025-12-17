@@ -678,4 +678,84 @@ function handleAddRemote(event) {
 let app;
 document.addEventListener('DOMContentLoaded', () => {
     app = new CodexApp();
+        // Bind sync button if present
+        const btn = document.getElementById('syncVeilBtn');
+        if (btn) {
+            btn.addEventListener('click', async () => {
+                try {
+                    btn.disabled = true;
+                    btn.textContent = 'Syncing...';
+                    await app.syncWithVeil();
+                    alert('Sync complete');
+                } catch (e) {
+                    console.error('sync failed', e);
+                    alert('Sync failed: ' + e.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Sync with Veil';
+                }
+            });
+        }
 });
+
+// Listen for messages from host (Veil)
+window.addEventListener('message', (ev) => {
+    if (!ev.data || !ev.data.type) return;
+    if (ev.data.type === 'veil:node-selected') {
+        const node = ev.data.node;
+        // Attempt to focus the node in the Codex UI
+        if (node && node.id) {
+            // Assume there's a function findAndOpenNode in the prototype
+            if (typeof window.findAndOpenNode === 'function') {
+                window.findAndOpenNode(node.id);
+            } else {
+                console.log('Codex received node-selected for', node);
+            }
+        }
+    }
+});
+
+// Wire the Sync with Veil button if present
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('syncWithVeilBtn');
+    if (btn) btn.addEventListener('click', () => {
+        if (typeof app !== 'undefined' && typeof app.syncWithVeil === 'function') {
+            app.syncWithVeil().then(() => alert('Sync complete')).catch((err) => alert('Sync failed: ' + err));
+        } else {
+            alert('Sync not available');
+        }
+    });
+});
+
+// Sync data from Veil Codex endpoints into local IndexedDB
+CodexApp.prototype.syncWithVeil = async function() {
+    // Fetch commits
+    const res = await fetch('/api/codex/commits?limit=100');
+    if (!res.ok) throw new Error('Failed to fetch commits');
+    const commits = await res.json();
+    // For each commit, fetch objects and store
+    for (const c of commits) {
+        if (!c.objects || !Array.isArray(c.objects)) continue;
+        for (const h of c.objects) {
+            try {
+                const ob = await fetch(`/api/codex/object?hash=${encodeURIComponent(h)}`);
+                if (!ob.ok) continue;
+                const payload = await ob.json();
+                // Simple heuristics: store based on keys
+                if (payload.urn && (payload.type === 'Text' || payload.type === 'text' || payload.content)) {
+                    await this.addToStore('texts', payload);
+                } else if (payload.urn && (payload.type === 'Entity' || payload.type === 'entity' || payload.labels)) {
+                    await this.addToStore('entities', payload);
+                } else {
+                    // fallback to annotations store
+                    await this.addToStore('annotations', { id: h, payload });
+                }
+            } catch (e) {
+                console.warn('object fetch/store failed', h, e);
+            }
+        }
+    }
+    // reload and render
+    await this.loadData();
+    this.renderAll();
+};

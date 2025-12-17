@@ -39,6 +39,8 @@ Codex Universal is a next-generation text referencing standard that bridges acad
 git clone https://github.com/your-org/codex-universal-pwa.git
 cd codex-universal-pwa
 
+# NOTICE: This PWA is now legacy. All new development and migration is in veil/web/codex (unified frontend).
+
 # Serve locally (requires Python 3)
 python3 -m http.server 8000
 

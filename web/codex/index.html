@@ -1,0 +1,41 @@
+<!-- Unified Codex PWA Frontend (Merged) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex Universal (Unified)</title>
+    <link rel="stylesheet" href="/web/all.min.css">
+    <link rel="manifest" href="/web/codex/manifest.json">
+</head>
+<body>
+    <div id="app-root"></div>
+    <script src="/web/codex/app.js" type="module"></script>
+</body>
+</html><!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Codex — Veil</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, sans-serif; padding: 1rem; }
+    pre { background: #0f172a; color: #e6eef8; padding: 1rem; border-radius: 6px; overflow:auto }
+    button { margin: .2rem }
+  </style>
+</head>
+<body>
+  <h1>Codex</h1>
+  <p>A lightweight Codex UI integrated into Veil.</p>
+  <div>
+    <button id="btnStatus">Repository Status</button>
+    <button id="btnList">List Objects</button>
+    <input id="objHash" placeholder="object hash" style="width:40%" />
+    <button id="btnGet">Get Object</button>
+  </div>
+  <hr />
+  <pre id="output">Ready.</pre>
+
+  <script src="/codex/app.js"></script>
+</body>
+</html>

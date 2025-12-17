@@ -1,0 +1,20 @@
+{
+  "name": "Codex Universal (Unified)",
+  "short_name": "Codex",
+  "start_url": "/web/codex/index.html",
+  "display": "standalone",
+  "background_color": "#fff",
+  "theme_color": "#22223b",
+  "icons": [
+    {
+      "src": "/web/webfonts/codex-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/web/webfonts/codex-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

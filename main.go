@@ -465,6 +465,14 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/resolve-uri", handleResolveURI)
 	mux.HandleFunc("/api/generate-uri", handleGenerateURI)
 
+	// Codex UI route (serve small built UI)
+	mux.Handle("/codex/", http.StripPrefix("/codex/", http.FileServer(http.FS(webFS))))
+	// Full prototype UI: serve codex-universalis static files
+	mux.Handle("/codex-prototype/", http.StripPrefix("/codex-prototype/", http.FileServer(http.Dir("./codex-universalis"))))
+
+	// Register codex API handlers
+	registerCodexHandlers(mux)
+
 	return mux
 }
 

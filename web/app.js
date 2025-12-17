@@ -2404,223 +2404,50 @@ async function deleteReminder(id) {
     }
 }
 
-// Context menu for media
-let mediaContextMenu = null;
-
-function createMediaContextMenu() {
-    if (mediaContextMenu) {
-        mediaContextMenu.remove();
-    }
-
-    mediaContextMenu = document.createElement('div');
-    mediaContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
-    mediaContextMenu.style.minWidth = '200px';
-    mediaContextMenu.innerHTML = `
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="insert">
-            <i class="fas fa-plus mr-2"></i>Insert into Editor
-        </div>
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="copy-link">
-            <i class="fas fa-link mr-2"></i>Copy Link
-        </div>
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="download">
-            <i class="fas fa-download mr-2"></i>Download
-        </div>
-        <hr class="my-1">
-        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
-            <i class="fas fa-trash mr-2"></i>Delete
-        </div>
-    `;
-
-    document.body.appendChild(mediaContextMenu);
-
-    // Handle menu actions
-    mediaContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
-        item.addEventListener('click', handleMediaContextMenuAction);
-    });
-
-    return mediaContextMenu;
-}
-
-function showMediaContextMenu(e, mediaId) {
-    e.preventDefault();
-
-    if (!mediaContextMenu) {
-        createMediaContextMenu();
-    }
-
-    mediaContextMenu.dataset.mediaId = mediaId;
-    mediaContextMenu.style.left = e.pageX + 'px';
-    mediaContextMenu.style.top = e.pageY + 'px';
-    mediaContextMenu.classList.remove('hidden');
-
-    // Close on click outside
-    setTimeout(() => {
-        document.addEventListener('click', hideMediaContextMenu);
-    }, 10);
-}
-
-function hideMediaContextMenu() {
-    if (mediaContextMenu) {
-        mediaContextMenu.classList.add('hidden');
-    }
-    document.removeEventListener('click', hideMediaContextMenu);
-}
-
-async function handleMediaContextMenuAction(e) {
-    const action = e.currentTarget.dataset.action;
-    const mediaId = mediaContextMenu.dataset.mediaId;
-
-    hideMediaContextMenu();
-
-    // Find media item
-    const mediaItem = document.querySelector(`[data-media-id="${mediaId}"]`);
-    if (!mediaItem) return;
-
-    const url = mediaItem.dataset.mediaUrl;
-    const filename = mediaItem.dataset.mediaFilename;
-
-    switch(action) {
-        case 'insert':
-            insertMediaIntoEditor(url, filename);
-            break;
-        case 'copy-link':
-            navigator.clipboard.writeText(url);
-            showToast('Link copied to clipboard');
-            break;
-        case 'download':
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            break;
-        case 'delete':
-            if (confirm('Are you sure you want to delete this media file?')) {
-                await deleteMedia(mediaId);
-            }
-            break;
+// ====== CODEX EMBED HANDLERS ======
+function showCodexPanel() {
+    const panel = document.getElementById('codexPanel');
+    if (!panel) return;
+    panel.classList.remove('hidden');
+    // ensure iframe has src set (lazy load)
+    const iframe = document.getElementById('codexIframe');
+    if (iframe && !iframe.src) {
+        iframe.src = '/codex-prototype/index.html';
     }
 }
 
-async function deleteMedia(mediaId) {
+function hideCodexPanel() {
+    const panel = document.getElementById('codexPanel');
+    if (!panel) return;
+    panel.classList.add('hidden');
+}
+
+// Send selected node data to Codex iframe (postMessage)
+function sendNodeToCodex(node) {
     try {
-        const response = await fetch(`/api/media/${mediaId}`, {
-            method: 'DELETE'
-        });
-
-        if (response.ok) {
-            showToast('Media deleted');
-            loadMediaLibrary();
-        } else {
-            showToast('Failed to delete media', 'error');
-        }
+        const iframe = document.getElementById('codexIframe');
+        if (!iframe) return;
+        iframe.contentWindow.postMessage({ type: 'veil:node-selected', node }, '*');
     } catch (e) {
-        console.error('Delete media error:', e);
-        showToast('Failed to delete media', 'error');
+        console.warn('Failed to post message to Codex iframe', e);
     }
 }
 
-// Context menu for versions
-let versionContextMenu = null;
+// Hook the buttons
+(function attachCodexHandlers() {
+    const codexBtn = document.getElementById('codexBtn');
+    if (codexBtn) codexBtn.addEventListener('click', () => showCodexPanel());
+    const codexClose = document.getElementById('codexCloseBtn');
+    if (codexClose) codexClose.addEventListener('click', () => hideCodexPanel());
 
-function createVersionContextMenu() {
-    if (versionContextMenu) {
-        versionContextMenu.remove();
+    // When a node is opened in Veil, send to Codex if panel open
+    const originalOpenNode = window.openNode;
+    window.openNode = async function (nodeId) {
+        await originalOpenNode(nodeId);
+        if (!document.getElementById('codexPanel')) return;
+        if (!document.getElementById('codexPanel').classList.contains('hidden')) {
+            // currentNode is set by openNode; send its minimal data
+            if (window.currentNode) sendNodeToCodex({ id: currentNode.id, title: currentNode.title, content: currentNode.content });
+        }
     }
-
-    versionContextMenu = document.createElement('div');
-    versionContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
-    versionContextMenu.style.minWidth = '200px';
-    versionContextMenu.innerHTML = `
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="restore">
-            <i class="fas fa-undo mr-2"></i>Restore
-        </div>
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="compare">
-            <i class="fas fa-exchange-alt mr-2"></i>Compare
-        </div>
-        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="export">
-            <i class="fas fa-download mr-2"></i>Export
-        </div>
-        <hr class="my-1">
-        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
-            <i class="fas fa-trash mr-2"></i>Delete
-        </div>
-    `;
-
-    document.body.appendChild(versionContextMenu);
-
-    // Handle menu actions
-    versionContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
-        item.addEventListener('click', handleVersionContextMenuAction);
-    });
-
-    return versionContextMenu;
-}
-
-function showVersionContextMenu(e, versionId) {
-    e.preventDefault();
-
-    if (!versionContextMenu) {
-        createVersionContextMenu();
-    }
-
-    versionContextMenu.dataset.versionId = versionId;
-    versionContextMenu.style.left = e.pageX + 'px';
-    versionContextMenu.style.top = e.pageY + 'px';
-    versionContextMenu.classList.remove('hidden');
-
-    // Close on click outside
-    setTimeout(() => {
-        document.addEventListener('click', hideVersionContextMenu);
-    }, 10);
-}
-
-function hideVersionContextMenu() {
-    if (versionContextMenu) {
-        versionContextMenu.classList.add('hidden');
-    }
-    document.removeEventListener('click', hideVersionContextMenu);
-}
-
-async function handleVersionContextMenuAction(e) {
-    const action = e.currentTarget.dataset.action;
-    const versionId = versionContextMenu.dataset.versionId;
-
-    hideVersionContextMenu();
-
-    switch(action) {
-        case 'restore':
-            await rollbackVersion(versionId);
-            break;
-        case 'compare':
-            await compareVersion(versionId);
-            break;
-        case 'export':
-            window.location.href = `/api/export?version_id=${versionId}`;
-            break;
-        case 'delete':
-            if (confirm('Are you sure you want to delete this version?')) {
-                await deleteVersion(versionId);
-            }
-            break;
-    }
-}
-
-async function compareVersion(versionId) {
-    // Open comparison modal or show diff
-    alert('Version comparison - Feature coming soon!');
-}
-
-async function deleteVersion(versionId) {
-    try {
-        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/versions/${versionId}`, {
-            method: 'DELETE'
-        });
-        showToast('Version deleted');
-        showVersions(); // Refresh versions list
-    } catch (err) {
-        console.error('Delete version error:', err);
-        showToast('Failed to delete version', 'error');
-    }
-}
+})();
