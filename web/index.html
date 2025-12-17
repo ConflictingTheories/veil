@@ -403,9 +403,32 @@
                         </label>
                     </div>
                     <div class="text-sm text-slate-600 space-y-2">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="text" placeholder="Repository URL" class="px-3 py-2 border rounded text-xs" id="gitRepo">
+                            <input type="text" placeholder="Branch (main)" class="px-3 py-2 border rounded text-xs" id="gitBranch" value="main">
+                        </div>
+                        <input type="password" placeholder="GitHub Token (for API)" class="w-full px-3 py-2 border rounded text-xs" id="gitToken">
                         <div class="flex gap-2">
-                            <input type="text" placeholder="Repository URL" class="flex-1 px-3 py-2 border rounded text-xs" id="gitRepo">
-                            <button onclick="saveGitConfig()" class="px-3 py-2 bg-indigo-600 text-white rounded text-xs">Save</button>
+                            <button onclick="saveGitConfig()" class="px-3 py-2 bg-indigo-600 text-white rounded text-xs">Save Config</button>
+                            <button onclick="cloneRepo()" class="px-3 py-2 bg-green-600 text-white rounded text-xs">Clone</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="pushChanges()" class="px-3 py-2 bg-blue-600 text-white rounded text-xs">Push</button>
+                            <button onclick="pullChanges()" class="px-3 py-2 bg-yellow-600 text-white rounded text-xs">Pull</button>
+                            <button onclick="syncRepo()" class="px-3 py-2 bg-purple-600 text-white rounded text-xs">Sync</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="commitChanges()" class="px-3 py-2 bg-indigo-600 text-white rounded text-xs">Commit</button>
+                            <button onclick="createPR()" class="px-3 py-2 bg-pink-600 text-white rounded text-xs">Create PR</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="listIssues()" class="px-3 py-2 bg-gray-600 text-white rounded text-xs">List Issues</button>
+                            <button onclick="createIssue()" class="px-3 py-2 bg-red-600 text-white rounded text-xs">Create Issue</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="forkRepo()" class="px-3 py-2 bg-orange-600 text-white rounded text-xs">Fork</button>
+                            <button onclick="starRepo()" class="px-3 py-2 bg-yellow-600 text-white rounded text-xs">Star</button>
+                            <button onclick="getRepos()" class="px-3 py-2 bg-teal-600 text-white rounded text-xs">Get Repos</button>
                         </div>
                     </div>
                 </div>
@@ -475,14 +498,14 @@
                     </div>
                 </div>
 
-                <!-- SVG/Shader Editors -->
+                <!-- SVG Editor -->
                 <div class="border border-slate-200 rounded-lg p-4">
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-3">
-                            <i class="fas fa-paint-brush text-2xl text-pink-600"></i>
+                            <i class="fas fa-vector-square text-2xl text-purple-600"></i>
                             <div>
-                                <h3 class="font-semibold text-slate-900">Creative Tools</h3>
-                                <p class="text-xs text-slate-500">SVG & Shader editors</p>
+                                <h3 class="font-semibold text-slate-900">SVG Editor</h3>
+                                <p class="text-xs text-slate-500">Vector graphics editor</p>
                             </div>
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer">
@@ -490,6 +513,104 @@
                             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                         </label>
                     </div>
+                    <div class="text-sm text-slate-600">
+                        <button onclick="createSVGCanvas()" class="w-full px-3 py-2 bg-purple-600 text-white rounded text-xs hover:bg-purple-700">
+                            <i class="fas fa-plus mr-1"></i> Create New SVG Canvas
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Shader Editor -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-magic text-2xl text-pink-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Shader Editor</h3>
+                                <p class="text-xs text-slate-500">WebGL shader editor</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="shader" checked>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2">
+                        <div class="flex gap-2">
+                            <select id="shaderType" class="flex-1 px-3 py-2 border rounded text-xs">
+                                <option value="vertex">Vertex Shader</option>
+                                <option value="fragment">Fragment Shader</option>
+                            </select>
+                            <button onclick="createShader()" class="px-3 py-2 bg-pink-600 text-white rounded text-xs hover:bg-pink-700">
+                                <i class="fas fa-plus mr-1"></i> Create
+                            </button>
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            Create interactive WebGL shaders
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Terminal Scripting -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-terminal text-2xl text-green-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Terminal Scripting</h3>
+                                <p class="text-xs text-slate-500">Execute commands & generate code</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="terminal">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2">
+                        <div class="flex gap-2">
+                            <select id="terminalAction" class="flex-1 px-3 py-2 border rounded text-xs">
+                                <option value="execute">Execute Command</option>
+                                <option value="install_package">Install Package</option>
+                                <option value="generate_code">Generate Code</option>
+                                <option value="run_tests">Run Tests</option>
+                                <option value="build_project">Build Project</option>
+                                <option value="check_dependencies">Check Dependencies</option>
+                            </select>
+                            <button onclick="openTerminalModal()" class="px-3 py-2 bg-green-600 text-white rounded text-xs hover:bg-green-700">
+                                <i class="fas fa-play mr-1"></i> Run
+                            </button>
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            Safe mode enabled - dangerous commands blocked
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reminder System -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-bell text-2xl text-yellow-600"></i>
+                            <div>
+                                <h3 class="font-semibold text-slate-900">Reminder System</h3>
+                                <p class="text-xs text-slate-500">Schedule and manage reminders</p>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" data-plugin="reminder">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+                    <div class="text-sm text-slate-600">
+                        <button onclick="openReminderModal()" class="w-full px-3 py-2 bg-yellow-600 text-white rounded text-xs hover:bg-yellow-700">
+                            <i class="fas fa-plus mr-1"></i> Manage Reminders
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Plugins -->
+                <div id="pluginsList" class="space-y-4">
+                    <!-- Dynamically loaded plugins will appear here -->
                 </div>
             </div>
         </div>
@@ -523,6 +644,205 @@
             <button id="exportSiteBtn" class="flex-1 py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium text-sm">
                 <i class="fas fa-download mr-2"></i>Export
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- Terminal Scripting Modal -->
+<div id="terminalModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="p-6 border-b border-slate-200 flex justify-between items-center">
+            <h2 class="text-lg font-bold text-slate-900">Terminal Scripting</h2>
+            <button data-modal-close class="text-slate-500 hover:text-slate-700 text-xl">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="p-6 flex-1 overflow-y-auto">
+            <div class="space-y-6">
+                <!-- Action Selection -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Action</label>
+                        <select id="terminalActionSelect" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <option value="execute">Execute Command</option>
+                            <option value="install_package">Install Package</option>
+                            <option value="generate_code">Generate Code</option>
+                            <option value="run_tests">Run Tests</option>
+                            <option value="build_project">Build Project</option>
+                            <option value="check_dependencies">Check Dependencies</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Working Directory</label>
+                        <input type="text" id="terminalWorkingDir" placeholder="./" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+                </div>
+
+                <!-- Dynamic Form Fields -->
+                <div id="terminalFormFields">
+                    <!-- Execute Command Fields -->
+                    <div id="executeFields" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Command</label>
+                            <input type="text" id="terminalCommand" placeholder="ls -la" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Environment Variables (optional)</label>
+                            <textarea id="terminalEnv" placeholder="KEY1=value1\nKEY2=value2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500" rows="3"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Install Package Fields -->
+                    <div id="installFields" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Package Manager</label>
+                            <select id="packageManager" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                                <option value="npm">npm</option>
+                                <option value="yarn">yarn</option>
+                                <option value="pip">pip</option>
+                                <option value="pip3">pip3</option>
+                                <option value="go">go</option>
+                                <option value="cargo">cargo</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Packages (comma-separated)</label>
+                            <input type="text" id="packageNames" placeholder="express,react,lodash" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        </div>
+                    </div>
+
+                    <!-- Generate Code Fields -->
+                    <div id="generateFields" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Template</label>
+                            <select id="codeTemplate" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                                <option value="react-component">React Component</option>
+                                <option value="go-web-server">Go Web Server</option>
+                                <option value="python-flask-app">Python Flask App</option>
+                                <option value="rust-binary">Rust Binary</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Name</label>
+                            <input type="text" id="codeName" placeholder="MyComponent" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Output Directory</label>
+                            <input type="text" id="codeDirectory" placeholder="./generated" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        </div>
+                    </div>
+
+                    <!-- Test Fields -->
+                    <div id="testFields" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Project Type</label>
+                            <select id="testProjectType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                                <option value="node">Node.js</option>
+                                <option value="python">Python</option>
+                                <option value="go">Go</option>
+                                <option value="rust">Rust</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Build Fields -->
+                    <div id="buildFields" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Project Type</label>
+                            <select id="buildProjectType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                                <option value="node">Node.js</option>
+                                <option value="go">Go</option>
+                                <option value="rust">Rust</option>
+                                <option value="python">Python</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Dependencies Fields -->
+                    <div id="dependenciesFields" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Dependencies to Check (comma-separated)</label>
+                            <input type="text" id="dependenciesList" placeholder="node,npm,go,cargo" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Execute Button -->
+                <div class="flex justify-end">
+                    <button onclick="executeTerminalAction()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium text-sm">
+                        <i class="fas fa-play mr-2"></i>Execute
+                    </button>
+                </div>
+
+                <!-- Output Area -->
+                <div class="border border-slate-200 rounded-lg">
+                    <div class="p-4 border-b border-slate-200 bg-slate-50">
+                        <h3 class="text-sm font-semibold text-slate-900">Output</h3>
+                    </div>
+                    <div id="terminalOutput" class="p-4 bg-slate-900 text-green-400 font-mono text-sm max-h-96 overflow-y-auto">
+                        <div class="text-slate-500">Ready to execute commands...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reminder Modal -->
+<div id="reminderModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="p-6 border-b border-slate-200 flex justify-between items-center">
+            <h2 class="text-lg font-bold text-slate-900">Reminder System</h2>
+            <button data-modal-close class="text-slate-500 hover:text-slate-700 text-xl">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="p-6 flex-1 overflow-y-auto">
+            <div class="space-y-6">
+                <!-- Create Reminder Form -->
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <h3 class="text-sm font-semibold text-slate-900 mb-4">Create New Reminder</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Title</label>
+                            <input type="text" id="reminderTitle" placeholder="Reminder title" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Remind At</label>
+                            <input type="datetime-local" id="reminderDateTime" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Description (optional)</label>
+                        <textarea id="reminderDescription" placeholder="Additional details..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500" rows="3"></textarea>
+                    </div>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Recurrence</label>
+                        <select id="reminderRecurrence" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                            <option value="none">None</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
+                    <div class="mt-4 flex justify-end">
+                        <button onclick="createReminder()" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition font-medium text-sm">
+                            <i class="fas fa-plus mr-2"></i>Create Reminder
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Reminders List -->
+                <div class="border border-slate-200 rounded-lg">
+                    <div class="p-4 border-b border-slate-200 bg-slate-50">
+                        <h3 class="text-sm font-semibold text-slate-900">Your Reminders</h3>
+                    </div>
+                    <div id="remindersList" class="p-4 space-y-3 max-h-96 overflow-y-auto">
+                        <div class="text-slate-500 text-sm">Loading reminders...</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

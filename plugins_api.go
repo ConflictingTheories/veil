@@ -43,6 +43,24 @@ func initializeDefaultPlugins() {
 		log.Println("Pixospritz plugin registration:", err)
 	}
 
+	// Terminal Scripting
+	terminalPlugin := NewTerminalScriptingPlugin()
+	if err := pluginRegistry.Register(terminalPlugin); err != nil {
+		log.Println("Terminal scripting plugin registration:", err)
+	}
+	if err := terminalPlugin.Initialize(map[string]interface{}{"safe_mode": true}); err != nil {
+		log.Println("Terminal scripting plugin initialization:", err)
+	}
+
+	// Reminder
+	reminderPlugin := NewReminderPlugin()
+	if err := pluginRegistry.Register(reminderPlugin); err != nil {
+		log.Println("Reminder plugin registration:", err)
+	}
+	if err := reminderPlugin.Initialize(map[string]interface{}{}); err != nil {
+		log.Println("Reminder plugin initialization:", err)
+	}
+
 	fmt.Println("✓ All plugins registered successfully")
 }
 

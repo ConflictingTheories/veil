@@ -85,6 +85,10 @@ func (gp *GitPlugin) Execute(ctx context.Context, action string, payload interfa
 		return gp.createIssue(ctx, payload)
 	case "fork":
 		return gp.forkRepo(ctx, payload)
+	case "star":
+		return gp.starRepo(ctx, payload)
+	case "get_repos":
+		return gp.getRepos(ctx, payload)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
@@ -508,5 +512,111 @@ func (gp *GitPlugin) forkRepo(ctx context.Context, payload interface{}) (interfa
 	return map[string]interface{}{
 		"status": "forked",
 		"fork":   forkResponse,
+	}, nil
+}
+
+func (gp *GitPlugin) starRepo(ctx context.Context, payload interface{}) (interface{}, error) {
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	req, ok := payload.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid payload")
+	}
+
+	owner, ok := req["owner"].(string)
+	if !ok {
+		return nil, fmt.Errorf("owner is required")
+	}
+
+	repo, ok := req["repo"].(string)
+	if !ok {
+		return nil, fmt.Errorf("repo is required")
+	}
+
+	url := fmt.Sprintf("https://api.github.com/user/starred/%s/%s", owner, repo)
+	httpReq, _ := http.NewRequestWithContext(ctx, "PUT", url, nil)
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	success := resp.StatusCode == 204
+
+	return map[string]interface{}{
+		"starred": success,
+		"owner":   owner,
+		"repo":    repo,
+	}, nil
+}
+
+func (gp *GitPlugin) getRepos(ctx context.Context, payload interface{}) (interface{}, error) {
+	token, _ := loadConfig("github_token")
+	if token == nil {
+		return nil, fmt.Errorf("GitHub token not configured")
+	}
+
+	req, ok := payload.(map[string]interface{})
+	if !ok {
+		req = make(map[string]interface{})
+	}
+
+	// Default to authenticated user's repos if no username specified
+	username, _ := req["username"].(string)
+	var reposURL string
+	if username != "" {
+		reposURL = fmt.Sprintf("https://api.github.com/users/%s/repos", username)
+	} else {
+		reposURL = "https://api.github.com/user/repos"
+	}
+
+	// Add query parameters
+	params := ""
+	if visibility, ok := req["visibility"].(string); ok {
+		params += "&visibility=" + visibility
+	}
+	if sort, ok := req["sort"].(string); ok {
+		params += "&sort=" + sort
+	}
+	if direction, ok := req["direction"].(string); ok {
+		params += "&direction=" + direction
+	}
+	if perPage, ok := req["per_page"].(float64); ok {
+		params += fmt.Sprintf("&per_page=%.0f", perPage)
+	}
+
+	if params != "" {
+		reposURL += "?" + params[1:] // Remove leading &
+	}
+
+	httpReq, _ := http.NewRequestWithContext(ctx, "GET", reposURL, nil)
+	httpReq.Header.Set("Authorization", "token "+token.(string))
+	httpReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s", string(body))
+	}
+
+	var repos []map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&repos)
+
+	return map[string]interface{}{
+		"repos": repos,
+		"count": len(repos),
 	}, nil
 }

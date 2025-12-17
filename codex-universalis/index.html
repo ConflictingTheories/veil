@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1510">
+    <meta name="description" content="Codex Universal - A distributed knowledge architecture for the age of AI">
+    
+    <title>Codex Universal</title>
+    
+    <!-- PWA Configuration -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@300;400;600;700&family=Cormorant+Garamond:wght@300;400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Color Palette - Ancient Manuscript */
+            --parchment: #f4ede3;
+            --ink-dark: #1a1510;
+            --ink-medium: #3d342b;
+            --ink-fade: #7a6f60;
+            --sepia: #c4a574;
+            --gold: #d4af37;
+            --vermillion: #c73e1d;
+            --indigo: #4a5d7c;
+            --emerald: #2d5947;
+            
+            /* Typography */
+            --font-display: 'Crimson Pro', serif;
+            --font-body: 'Cormorant Garamond', serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* Spacing */
+            --space-xs: 0.5rem;
+            --space-sm: 1rem;
+            --space-md: 2rem;
+            --space-lg: 4rem;
+            --space-xl: 6rem;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: linear-gradient(135deg, var(--parchment) 0%, #ebe2d5 100%);
+            color: var(--ink-dark);
+            line-height: 1.7;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Decorative Paper Texture */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(26, 21, 16, 0.01) 2px,
+                    rgba(26, 21, 16, 0.01) 4px
+                );
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Animated Illumination Border */
+        .illuminated-border {
+            position: fixed;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        .illuminated-border::before,
+        .illuminated-border::after {
+            content: '';
+            position: absolute;
+            background: linear-gradient(90deg, var(--gold), var(--vermillion), var(--indigo));
+        }
+
+        .illuminated-border.top {
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+        }
+
+        .illuminated-border.bottom {
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+        }
+
+        .illuminated-border.left {
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 3px;
+        }
+
+        .illuminated-border.right {
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 3px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--space-md);
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Header */
+        header {
+            padding: var(--space-lg) 0 var(--space-md);
+            text-align: center;
+            position: relative;
+        }
+
+        .logo {
+            font-family: var(--font-display);
+            font-size: 4.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--ink-dark), var(--vermillion), var(--gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: var(--space-xs);
+            animation: fadeInDown 1s ease-out;
+        }
+
+        .tagline {
+            font-size: 1.3rem;
+            color: var(--ink-medium);
+            font-weight: 300;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            opacity: 0;
+            animation: fadeIn 1s ease-out 0.3s forwards;
+        }
+
+        /* Navigation Tabs */
+        .nav-tabs {
+            display: flex;
+            gap: var(--space-xs);
+            margin: var(--space-md) 0;
+            border-bottom: 2px solid var(--sepia);
+            opacity: 0;
+            animation: fadeIn 1s ease-out 0.6s forwards;
+        }
+
+        .nav-tab {
+            flex: 1;
+            padding: var(--space-sm) var(--space-md);
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--ink-fade);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-tab::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--vermillion), var(--gold));
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .nav-tab:hover {
+            color: var(--ink-dark);
+        }
+
+        .nav-tab.active {
+            color: var(--ink-dark);
+            border-bottom-color: transparent;
+        }
+
+        .nav-tab.active::before {
+            transform: translateX(0);
+        }
+
+        /* Main Content Area */
+        .content-panel {
+            display: none;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease-out forwards;
+        }
+
+        .content-panel.active {
+            display: block;
+        }
+
+        /* Repository View */
+        .repo-header {
+            background: rgba(255, 255, 255, 0.6);
+            padding: var(--space-md);
+            border-radius: 12px;
+            border: 2px solid var(--sepia);
+            margin-bottom: var(--space-md);
+            backdrop-filter: blur(10px);
+        }
+
+        .repo-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-sm);
+        }
+
+        .repo-urn {
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--indigo);
+            padding: 0.5rem 1rem;
+            background: rgba(74, 93, 124, 0.1);
+            border-radius: 6px;
+        }
+
+        .repo-status {
+            display: flex;
+            gap: var(--space-sm);
+        }
+
+        .status-badge {
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            font-family: var(--font-display);
+        }
+
+        .status-badge.synced {
+            background: var(--emerald);
+            color: white;
+        }
+
+        .status-badge.modified {
+            background: var(--vermillion);
+            color: white;
+        }
+
+        /* Grid Layout for Cards */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: var(--space-md);
+            margin: var(--space-md) 0;
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid var(--sepia);
+            border-radius: 8px;
+            padding: var(--space-md);
+            position: relative;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--vermillion), var(--gold), var(--indigo));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(26, 21, 16, 0.15);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: var(--space-sm);
+        }
+
+        .card-title {
+            font-family: var(--font-display);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--ink-dark);
+            margin-bottom: 0.3rem;
+        }
+
+        .card-meta {
+            font-size: 0.85rem;
+            color: var(--ink-fade);
+            font-family: var(--font-mono);
+        }
+
+        .card-type {
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .card-type.text {
+            background: rgba(199, 62, 29, 0.1);
+            color: var(--vermillion);
+        }
+
+        .card-type.entity {
+            background: rgba(45, 89, 71, 0.1);
+            color: var(--emerald);
+        }
+
+        .card-type.annotation {
+            background: rgba(74, 93, 124, 0.1);
+            color: var(--indigo);
+        }
+
+        .card-content {
+            color: var(--ink-medium);
+            line-height: 1.8;
+            margin-bottom: var(--space-sm);
+        }
+
+        .card-content.preview {
+            max-height: 120px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .card-content.preview::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            background: linear-gradient(transparent, rgba(255, 255, 255, 0.95));
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            gap: var(--space-xs);
+            margin-top: var(--space-sm);
+        }
+
+        .btn {
+            padding: 0.7rem 1.5rem;
+            border: 2px solid var(--ink-dark);
+            background: transparent;
+            font-family: var(--font-display);
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--ink-dark);
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0;
+            height: 100%;
+            background: var(--ink-dark);
+            transition: width 0.3s ease;
+            z-index: -1;
+        }
+
+        .btn:hover {
+            color: var(--parchment);
+        }
+
+        .btn:hover::before {
+            width: 100%;
+        }
+
+        .btn.primary {
+            background: var(--vermillion);
+            border-color: var(--vermillion);
+            color: white;
+        }
+
+        .btn.primary::before {
+            background: var(--ink-dark);
+        }
+
+        .btn.secondary {
+            border-color: var(--indigo);
+            color: var(--indigo);
+        }
+
+        .btn.secondary::before {
+            background: var(--indigo);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(26, 21, 16, 0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: var(--parchment);
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: var(--space-lg);
+            border-radius: 12px;
+            border: 3px solid var(--gold);
+            position: relative;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: var(--space-sm);
+            right: var(--space-sm);
+            background: var(--vermillion);
+            color: white;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-close:hover {
+            transform: rotate(90deg);
+            background: var(--ink-dark);
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: var(--space-md);
+        }
+
+        .form-label {
+            display: block;
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--ink-dark);
+            margin-bottom: var(--space-xs);
+        }
+
+        .form-input,
+        .form-textarea,
+        .form-select {
+            width: 100%;
+            padding: 0.9rem;
+            border: 2px solid var(--sepia);
+            background: rgba(255, 255, 255, 0.9);
+            font-family: var(--font-body);
+            font-size: 1rem;
+            color: var(--ink-dark);
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus,
+        .form-textarea:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--vermillion);
+            box-shadow: 0 0 0 3px rgba(199, 62, 29, 0.1);
+        }
+
+        .form-textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Offline Indicator */
+        .offline-indicator {
+            position: fixed;
+            bottom: var(--space-md);
+            right: var(--space-md);
+            padding: 1rem 1.5rem;
+            background: var(--vermillion);
+            color: white;
+            border-radius: 8px;
+            font-family: var(--font-display);
+            font-weight: 600;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+            display: none;
+            z-index: 1000;
+        }
+
+        .offline-indicator.show {
+            display: block;
+            animation: fadeInUp 0.5s ease-out;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .logo {
+                font-size: 3rem;
+            }
+
+            .nav-tabs {
+                flex-direction: column;
+            }
+
+            .card-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .repo-info {
+                flex-direction: column;
+                gap: var(--space-sm);
+            }
+        }
+
+        /* Loading State */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--parchment);
+            border-radius: 50%;
+            border-top-color: var(--vermillion);
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Illuminated Borders -->
+    <div class="illuminated-border top"></div>
+    <div class="illuminated-border bottom"></div>
+    <div class="illuminated-border left"></div>
+    <div class="illuminated-border right"></div>
+
+    <!-- Offline Indicator -->
+    <div class="offline-indicator" id="offlineIndicator">
+        📡 Offline Mode Active
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1 class="logo">CODEX UNIVERSAL</h1>
+            <p class="tagline">A Distributed Knowledge Architecture</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-panel="repository">Repository</button>
+            <button class="nav-tab" data-panel="texts">Texts</button>
+            <button class="nav-tab" data-panel="entities">Entities</button>
+            <button class="nav-tab" data-panel="annotations">Annotations</button>
+            <button class="nav-tab" data-panel="sync">Synchronization</button>
+        </nav>
+
+        <!-- Repository Panel -->
+        <div class="content-panel active" id="repository">
+            <div class="repo-header">
+                <div class="repo-info">
+                    <div>
+                        <div class="repo-urn">urn:codex:local/my-collection</div>
+                        <p style="margin-top: 0.5rem; color: var(--ink-fade);">Local repository initialized</p>
+                    </div>
+                    <div class="repo-status">
+                        <span class="status-badge synced">✓ Synced</span>
+                        <span class="status-badge modified">3 Modified</span>
+                    </div>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn primary" onclick="showModal('commit')">Commit Changes</button>
+                    <button class="btn secondary" onclick="showModal('clone')">Clone Dataset</button>
+                    <button class="btn" onclick="showModal('newItem')">New Item</button>
+                </div>
+            </div>
+
+            <h2 style="font-family: var(--font-display); font-size: 2rem; margin-bottom: var(--space-md); color: var(--ink-dark);">Recent Activity</h2>
+            
+            <div class="card-grid" id="recentActivity">
+                <!-- Activity cards will be dynamically added here -->
+            </div>
+        </div>
+
+        <!-- Texts Panel -->
+        <div class="content-panel" id="texts">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
+                <h2 style="font-family: var(--font-display); font-size: 2rem; color: var(--ink-dark);">Text Fragments</h2>
+                <button class="btn primary" onclick="showModal('newText')">Add Text</button>
+            </div>
+            <div class="card-grid" id="textsGrid">
+                <!-- Text cards will be dynamically added here -->
+            </div>
+        </div>
+
+        <!-- Entities Panel -->
+        <div class="content-panel" id="entities">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
+                <h2 style="font-family: var(--font-display); font-size: 2rem; color: var(--ink-dark);">Ontological Entities</h2>
+                <button class="btn primary" onclick="showModal('newEntity')">Create Entity</button>
+            </div>
+            <div class="card-grid" id="entitiesGrid">
+                <!-- Entity cards will be dynamically added here -->
+            </div>
+        </div>
+
+        <!-- Annotations Panel -->
+        <div class="content-panel" id="annotations">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-md);">
+                <h2 style="font-family: var(--font-display); font-size: 2rem; color: var(--ink-dark);">Annotations</h2>
+                <button class="btn primary" onclick="showModal('newAnnotation')">Add Annotation</button>
+            </div>
+            <div class="card-grid" id="annotationsGrid">
+                <!-- Annotation cards will be dynamically added here -->
+            </div>
+        </div>
+
+        <!-- Sync Panel -->
+        <div class="content-panel" id="sync">
+            <h2 style="font-family: var(--font-display); font-size: 2rem; margin-bottom: var(--space-md); color: var(--ink-dark);">Federated Synchronization</h2>
+            
+            <div class="repo-header">
+                <h3 style="font-family: var(--font-display); font-size: 1.5rem; margin-bottom: var(--space-sm);">Trusted Authorities</h3>
+                <div id="trustedAuthorities">
+                    <!-- Trusted authority nodes will be listed here -->
+                </div>
+                <button class="btn primary" style="margin-top: var(--space-sm);" onclick="showModal('addRemote')">Add Remote</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="modal">
+        <div class="modal-content" id="modalContent">
+            <button class="modal-close" onclick="closeModal()">×</button>
+            <!-- Modal content will be dynamically inserted -->
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(registration => console.log('SW registered:', registration))
+                    .catch(error => console.log('SW registration failed:', error));
+            });
+        }
+
+        // Offline/Online Detection
+        window.addEventListener('online', () => {
+            document.getElementById('offlineIndicator').classList.remove('show');
+        });
+
+        window.addEventListener('offline', () => {
+            document.getElementById('offlineIndicator').classList.add('show');
+        });
+
+        // Check initial state
+        if (!navigator.onLine) {
+            document.getElementById('offlineIndicator').classList.add('show');
+        }
+    </script>
+</body>
+</html>

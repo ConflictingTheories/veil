@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Codex GUI (MVP)</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="container">
+        <h1>Codex GUI — MVP</h1>
+        <div class="actions">
+          <select id="branchSelect"></select>
+          <button id="exportBtn">Export</button>
+          <button id="commitBtn">Commit</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container main">
+      <section class="left">
+        <div id="status"></div>
+        <div class="panel">
+          <h3>Add Entity</h3>
+          <input id="entityId" placeholder="id (e.g., achilles)" />
+          <input id="entityLabel" placeholder="label (en)" />
+          <select id="entityType"><option>Character</option><option>Place</option><option>Concept</option></select>
+          <button id="addEntityBtn">Add Entity</button>
+        </div>
+
+        <div class="panel">
+          <h3>Annotate</h3>
+          <input id="textUrn" placeholder="text urn" />
+          <input id="entityUrn" placeholder="entity urn" />
+          <input id="start" placeholder="start" type="number" />
+          <input id="end" placeholder="end" type="number" />
+          <button id="annotateBtn">Annotate</button>
+        </div>
+
+        <div class="panel">
+          <h3>Objects</h3>
+          <pre id="objectsList">Loading…</pre>
+        </div>
+      </section>
+
+      <section class="center">
+        <div id="graphArea">Graph will appear here (simple)</div>
+      </section>
+
+      <section class="right">
+        <div class="panel">
+          <h3>Commit History</h3>
+          <div id="commitList">Loading…</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

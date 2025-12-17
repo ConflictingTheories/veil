@@ -135,15 +135,23 @@ async function loadSites() {
 function renderSitesList() {
     const list = document.getElementById('sitesList');
     if (!list) return;
-    
+
     list.innerHTML = (allSites || []).map(site => `
-        <div class="p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
+        <div class="site-item p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
             site.id === currentSite?.id ? 'border-indigo-600 bg-indigo-50' : 'border-transparent'
-        }" onclick="selectSite('${site.id}')">
+        }" data-site-id="${site.id}" onclick="selectSite('${site.id}')" oncontextmenu="showSiteContextMenu(event, '${site.id}')">
             <div class="font-medium text-slate-900 text-sm">${site.name}</div>
             <div class="text-xs text-slate-500 mt-1">${site.description || 'No description'}</div>
         </div>
     `).join('');
+
+    // Attach context menu event listeners
+    document.querySelectorAll('.site-item').forEach((item) => {
+        item.addEventListener('contextmenu', (e) => {
+            const siteId = item.dataset.siteId;
+            showSiteContextMenu(e, siteId);
+        });
+    });
 }
 
 async function selectSite(siteId) {
@@ -228,12 +236,11 @@ async function loadNodes() {
 function renderNodesList() {
     const list = document.getElementById('nodesList');
     if (!list) return;
-    
+
     list.innerHTML = (allNodes || []).map(n => `
-        <div onclick="openNode('${n.id}')" 
-            class="p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
-                n.id === currentNode?.id ? 'border-indigo-600 bg-indigo-50' : 'border-transparent'
-            }">
+        <div class="node-item p-3 rounded-lg hover:bg-indigo-50 cursor-pointer transition border-l-4 ${
+            n.id === currentNode?.id ? 'border-indigo-600 bg-indigo-50' : 'border-transparent'
+        }" data-node-id="${n.id}" onclick="openNode('${n.id}')" oncontextmenu="showNodeContextMenu(event, '${n.id}')">
             <div class="font-medium text-slate-900 text-sm flex items-center gap-2">
                 <span class="text-xs px-2 py-0.5 bg-slate-200 rounded-full">${n.type || 'note'}</span>
                 ${n.title || 'Untitled'}
@@ -241,6 +248,14 @@ function renderNodesList() {
             <div class="text-xs text-slate-500 mt-1">${n.path}</div>
         </div>
     `).join('');
+
+    // Attach context menu event listeners
+    document.querySelectorAll('.node-item').forEach((item) => {
+        item.addEventListener('contextmenu', (e) => {
+            const nodeId = item.dataset.nodeId;
+            showNodeContextMenu(e, nodeId);
+        });
+    });
 }
 
 function filterNodes(query) {
@@ -458,20 +473,28 @@ async function showVersions() {
         
         const list = document.getElementById('versionsList');
         list.innerHTML = (versions || []).map(v => `
-            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <div class="version-item p-3 bg-slate-50 rounded-lg border border-slate-200" data-version-id="${v.id}" oncontextmenu="showVersionContextMenu(event, '${v.id}')">
                 <div class="flex justify-between items-start">
                     <div>
                         <div class="font-medium text-sm">v${v.version_number}</div>
                         <div class="text-xs text-slate-500">${new Date(v.created_at * 1000).toLocaleString()}</div>
                         <div class="text-xs text-slate-600 mt-1 capitalize">${v.status}</div>
                     </div>
-                    <button onclick="rollbackVersion('${v.id}')" 
+                    <button onclick="rollbackVersion('${v.id}')"
                         class="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
                         Restore
                     </button>
                 </div>
             </div>
         `).join('');
+
+        // Attach context menu event listeners
+        document.querySelectorAll('.version-item').forEach((item) => {
+            item.addEventListener('contextmenu', (e) => {
+                const versionId = item.dataset.versionId;
+                showVersionContextMenu(e, versionId);
+            });
+        });
         
         openModal('versionsModal');
     } catch (e) {
@@ -576,11 +599,17 @@ async function loadPlugins() {
         }
         const data = await resp.json();
         const list = document.getElementById('pluginsList');
+        if (!list) {
+            console.error('pluginsList element not found');
+            return;
+        }
         list.innerHTML = '';
         (data || []).forEach(p => {
             const el = document.createElement('div');
-            el.className = 'flex items-center justify-between p-3 border rounded-lg';
+            el.className = 'plugin-item flex items-center justify-between p-3 border rounded-lg';
+            el.dataset.pluginSlug = p.slug;
             el.innerHTML = `<div class="text-sm"><div class="font-medium">${p.name}</div><div class="text-xs text-slate-500">${p.slug}</div></div><div><button class="toggle-btn px-3 py-1 rounded-lg text-sm">${p.enabled ? 'Disable' : 'Enable'}</button></div>`;
+            el.addEventListener('contextmenu', (e) => showPluginContextMenu(e, p.slug));
             el.querySelector('.toggle-btn').addEventListener('click', () => togglePlugin(p));
             list.appendChild(el);
         });
@@ -814,6 +843,54 @@ async function createSVGCanvas() {
     }
 }
 
+async function createShader() {
+    const shaderType = document.getElementById('shaderType').value;
+    const name = prompt(`Enter ${shaderType} shader name:`, `New ${shaderType.charAt(0).toUpperCase() + shaderType.slice(1)} Shader`);
+
+    if (!name) return;
+
+    try {
+        const response = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'shader',
+                action: 'create',
+                payload: { type: shaderType, name }
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.html) {
+            // Create a new node with the shader content
+            const nodeData = {
+                type: 'shader-demo',
+                title: name,
+                content: result.html,
+                path: `shaders/${name.toLowerCase().replace(/\s+/g, '-')}`,
+                mime_type: 'text/html'
+            };
+
+            const createResponse = await fetch(`/api/sites/${currentSite.id}/nodes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(nodeData)
+            });
+
+            if (createResponse.ok) {
+                showToast(`${shaderType.charAt(0).toUpperCase() + shaderType.slice(1)} shader created successfully!`, 'success');
+                await loadNodes(); // Refresh the node list
+            } else {
+                showToast('Failed to save shader', 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Shader creation failed:', error);
+        showToast('Failed to create shader', 'error');
+    }
+}
+
 // ====== UTILITY FUNCTIONS ======
 
 function showToast(message, type = 'info') {
@@ -860,22 +937,22 @@ async function saveGitConfig() {
     const repo = document.getElementById('gitRepo')?.value;
     const branch = document.getElementById('gitBranch')?.value;
     const token = document.getElementById('gitToken')?.value;
-    
+
     if (!repo || !branch) {
         alert('Please fill in all required fields');
         return;
     }
-    
+
     try {
         const response = await fetch('/api/plugins/git/configure', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 enabled: true,
                 config: { repo, branch, token }
             })
         });
-        
+
         if (response.ok) {
             alert('Git configuration saved');
         } else {
@@ -884,6 +961,115 @@ async function saveGitConfig() {
     } catch (e) {
         console.error('Git config error:', e);
         alert('Configuration error');
+    }
+}
+
+// Context menu for plugins
+let pluginContextMenu = null;
+
+function createPluginContextMenu() {
+    if (pluginContextMenu) {
+        pluginContextMenu.remove();
+    }
+
+    pluginContextMenu = document.createElement('div');
+    pluginContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    pluginContextMenu.style.minWidth = '200px';
+    pluginContextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="enable">
+            <i class="fas fa-toggle-on mr-2"></i>Enable
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="disable">
+            <i class="fas fa-toggle-off mr-2"></i>Disable
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="configure">
+            <i class="fas fa-cog mr-2"></i>Configure
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="uninstall">
+            <i class="fas fa-trash mr-2"></i>Uninstall
+        </div>
+    `;
+
+    document.body.appendChild(pluginContextMenu);
+
+    // Handle menu actions
+    pluginContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handlePluginContextMenuAction);
+    });
+
+    return pluginContextMenu;
+}
+
+function showPluginContextMenu(e, pluginSlug) {
+    e.preventDefault();
+
+    if (!pluginContextMenu) {
+        createPluginContextMenu();
+    }
+
+    pluginContextMenu.dataset.pluginSlug = pluginSlug;
+    pluginContextMenu.style.left = e.pageX + 'px';
+    pluginContextMenu.style.top = e.pageY + 'px';
+    pluginContextMenu.classList.remove('hidden');
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hidePluginContextMenu);
+    }, 10);
+}
+
+function hidePluginContextMenu() {
+    if (pluginContextMenu) {
+        pluginContextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hidePluginContextMenu);
+}
+
+async function handlePluginContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const pluginSlug = pluginContextMenu.dataset.pluginSlug;
+
+    hidePluginContextMenu();
+
+    switch(action) {
+        case 'enable':
+            await togglePlugin({ slug: pluginSlug, enabled: false });
+            break;
+        case 'disable':
+            await togglePlugin({ slug: pluginSlug, enabled: true });
+            break;
+        case 'configure':
+            await configurePlugin(pluginSlug);
+            break;
+        case 'uninstall':
+            if (confirm('Are you sure you want to uninstall this plugin?')) {
+                await uninstallPlugin(pluginSlug);
+            }
+            break;
+    }
+}
+
+async function configurePlugin(pluginSlug) {
+    // Open configuration modal for the specific plugin
+    alert(`Configuration for ${pluginSlug} - Feature coming soon!`);
+}
+
+async function uninstallPlugin(pluginSlug) {
+    try {
+        const response = await fetch(`/api/plugins/${pluginSlug}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            showToast('Plugin uninstalled');
+            await loadPlugins();
+        } else {
+            showToast('Failed to uninstall plugin', 'error');
+        }
+    } catch (e) {
+        console.error('Uninstall error:', e);
+        showToast('Failed to uninstall plugin', 'error');
     }
 }
 
@@ -932,13 +1118,21 @@ async function loadMediaLibrary() {
         library.innerHTML = media.map(m => {
             const isImage = m.mime_type && m.mime_type.startsWith('image/');
             return `
-                <div class="border border-slate-200 rounded-lg p-2 hover:border-indigo-500 cursor-pointer transition" onclick="insertMediaIntoEditor('${m.url}', '${m.filename}')">
+                <div class="media-item border border-slate-200 rounded-lg p-2 hover:border-indigo-500 cursor-pointer transition" data-media-id="${m.id}" data-media-url="${m.url}" data-media-filename="${m.filename}" onclick="insertMediaIntoEditor('${m.url}', '${m.filename}')" oncontextmenu="showMediaContextMenu(event, '${m.id}')">
                     ${isImage ? `<img src="${m.url}" alt="${m.filename}" class="w-full h-24 object-cover rounded mb-1">` : `<div class="w-full h-24 bg-slate-100 rounded mb-1 flex items-center justify-center"><i class="fas fa-file text-3xl text-slate-400"></i></div>`}
                     <p class="text-xs text-slate-600 truncate" title="${m.filename}">${m.filename}</p>
                     <p class="text-xs text-slate-400">${formatFileSize(m.size)}</p>
                 </div>
             `;
         }).join('');
+
+        // Attach context menu event listeners
+        document.querySelectorAll('.media-item').forEach((item) => {
+            item.addEventListener('contextmenu', (e) => {
+                const mediaId = item.dataset.mediaId;
+                showMediaContextMenu(e, mediaId);
+            });
+        });
     } catch (err) {
         console.error('Failed to load media:', err);
     }
@@ -1296,18 +1490,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Context menu system
-let contextMenu = null;
+// Context menu system for nodes
+let nodeContextMenu = null;
 
-function createContextMenu() {
-    if (contextMenu) {
-        contextMenu.remove();
+function createNodeContextMenu() {
+    if (nodeContextMenu) {
+        nodeContextMenu.remove();
     }
-    
-    contextMenu = document.createElement('div');
-    contextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
-    contextMenu.style.minWidth = '200px';
-    contextMenu.innerHTML = `
+
+    nodeContextMenu = document.createElement('div');
+    nodeContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    nodeContextMenu.style.minWidth = '200px';
+    nodeContextMenu.innerHTML = `
         <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="preview">
             <i class="fas fa-eye mr-2"></i>Preview
         </div>
@@ -1329,48 +1523,48 @@ function createContextMenu() {
             <i class="fas fa-trash mr-2"></i>Delete
         </div>
     `;
-    
-    document.body.appendChild(contextMenu);
-    
+
+    document.body.appendChild(nodeContextMenu);
+
     // Handle menu actions
-    contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
-        item.addEventListener('click', handleContextMenuAction);
+    nodeContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleNodeContextMenuAction);
     });
-    
-    return contextMenu;
+
+    return nodeContextMenu;
 }
 
-function showContextMenu(e, nodeId) {
+function showNodeContextMenu(e, nodeId) {
     e.preventDefault();
-    
-    if (!contextMenu) {
-        createContextMenu();
+
+    if (!nodeContextMenu) {
+        createNodeContextMenu();
     }
-    
-    contextMenu.dataset.nodeId = nodeId;
-    contextMenu.style.left = e.pageX + 'px';
-    contextMenu.style.top = e.pageY + 'px';
-    contextMenu.classList.remove('hidden');
-    
+
+    nodeContextMenu.dataset.nodeId = nodeId;
+    nodeContextMenu.style.left = e.pageX + 'px';
+    nodeContextMenu.style.top = e.pageY + 'px';
+    nodeContextMenu.classList.remove('hidden');
+
     // Close on click outside
     setTimeout(() => {
-        document.addEventListener('click', hideContextMenu);
+        document.addEventListener('click', hideNodeContextMenu);
     }, 10);
 }
 
-function hideContextMenu() {
-    if (contextMenu) {
-        contextMenu.classList.add('hidden');
+function hideNodeContextMenu() {
+    if (nodeContextMenu) {
+        nodeContextMenu.classList.add('hidden');
     }
-    document.removeEventListener('click', hideContextMenu);
+    document.removeEventListener('click', hideNodeContextMenu);
 }
 
-async function handleContextMenuAction(e) {
+async function handleNodeContextMenuAction(e) {
     const action = e.currentTarget.dataset.action;
-    const nodeId = contextMenu.dataset.nodeId;
-    
-    hideContextMenu();
-    
+    const nodeId = nodeContextMenu.dataset.nodeId;
+
+    hideNodeContextMenu();
+
     switch(action) {
         case 'preview':
             if (currentSite) {
@@ -1405,23 +1599,23 @@ async function duplicateNode(nodeId) {
     try {
         const response = await fetch(`/api/sites/${currentSite.id}/nodes/${nodeId}`);
         const original = await response.json();
-        
+
         const duplicate = {
             type: original.type,
             title: original.title + ' (Copy)',
             content: original.content,
             path: original.path.replace(/\.md$/, '-copy.md')
         };
-        
+
         const createResponse = await fetch(`/api/sites/${currentSite.id}/nodes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(duplicate)
         });
-        
+
         if (createResponse.ok) {
             showToast('Note duplicated');
-            loadNotes();
+            loadNodes();
         }
     } catch (err) {
         console.error('Duplicate error:', err);
@@ -1453,23 +1647,980 @@ async function deleteNode(nodeId) {
             currentNode = null;
             document.getElementById('editor').value = '';
         }
-        loadNotes();
+        loadNodes();
     } catch (err) {
         console.error('Delete error:', err);
         showToast('Failed to delete', 'error');
     }
 }
 
-// Hook up context menu to note list
-document.addEventListener('DOMContentLoaded', function() {
-    const nodesList = document.getElementById('nodesList');
-    if (nodesList) {
-        nodesList.addEventListener('contextmenu', function(e) {
-            const noteEl = e.target.closest('[onclick*="selectNode"]');
-            if (noteEl) {
-                const nodeId = noteEl.getAttribute('onclick').match(/'([^']+)'/)[1];
-                showContextMenu(e, nodeId);
-            }
-        });
+// Context menu system for sites
+let siteContextMenu = null;
+
+function createSiteContextMenu() {
+    if (siteContextMenu) {
+        siteContextMenu.remove();
     }
-});
+
+    siteContextMenu = document.createElement('div');
+    siteContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    siteContextMenu.style.minWidth = '200px';
+    siteContextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="open">
+            <i class="fas fa-folder-open mr-2"></i>Open
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="edit">
+            <i class="fas fa-edit mr-2"></i>Edit
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="duplicate">
+            <i class="fas fa-copy mr-2"></i>Duplicate
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="export">
+            <i class="fas fa-download mr-2"></i>Export
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="publish">
+            <i class="fas fa-rocket mr-2"></i>Publish All
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
+            <i class="fas fa-trash mr-2"></i>Delete
+        </div>
+    `;
+
+    document.body.appendChild(siteContextMenu);
+
+    // Handle menu actions
+    siteContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleSiteContextMenuAction);
+    });
+
+    return siteContextMenu;
+}
+
+function showSiteContextMenu(e, siteId) {
+    e.preventDefault();
+
+    if (!siteContextMenu) {
+        createSiteContextMenu();
+    }
+
+    siteContextMenu.dataset.siteId = siteId;
+    siteContextMenu.style.left = e.pageX + 'px';
+    siteContextMenu.style.top = e.pageY + 'px';
+    siteContextMenu.classList.add('hidden');
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideSiteContextMenu);
+    }, 10);
+}
+
+function hideSiteContextMenu() {
+    if (siteContextMenu) {
+        siteContextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hideSiteContextMenu);
+}
+
+async function handleSiteContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const siteId = siteContextMenu.dataset.siteId;
+
+    hideSiteContextMenu();
+
+    switch(action) {
+        case 'open':
+            await selectSite(siteId);
+            break;
+        case 'edit':
+            await editSite(siteId);
+            break;
+        case 'duplicate':
+            await duplicateSite(siteId);
+            break;
+        case 'export':
+            window.location.href = `/api/export?site_id=${siteId}`;
+            break;
+        case 'publish':
+            await publishSite(siteId);
+            break;
+        case 'delete':
+            if (confirm('Are you sure you want to delete this site?')) {
+                await deleteSite(siteId);
+            }
+            break;
+    }
+}
+
+async function editSite(siteId) {
+    const site = allSites.find(s => s.id === siteId);
+    if (!site) return;
+
+    // Populate site editor modal
+    document.getElementById('siteNameInput').value = site.name || '';
+    document.getElementById('siteDescriptionInput').value = site.description || '';
+    document.getElementById('siteTypeInput').value = site.type || 'project';
+
+    // Store site ID for update
+    document.getElementById('siteEditorModal').dataset.editSiteId = siteId;
+
+    // Change button text
+    document.querySelector('#siteEditorModal button[id="saveSiteBtn"]').textContent = 'Update Site';
+    document.querySelector('#siteEditorModal button[id="saveSiteBtn"]').onclick = () => updateSite(siteId);
+
+    openModal('siteEditorModal');
+}
+
+async function updateSite(siteId) {
+    const name = document.getElementById('siteNameInput').value;
+    const description = document.getElementById('siteDescriptionInput').value;
+    const type = document.getElementById('siteTypeInput').value;
+
+    try {
+        const resp = await fetch('/api/sites', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: siteId, name, description, type })
+        });
+
+        if (!resp.ok) {
+            const body = await resp.text().catch(() => resp.statusText);
+            alert('Failed to update site: ' + body);
+            return;
+        }
+
+        // Refresh sites list
+        await loadSites();
+
+        // Reset modal
+        delete document.getElementById('siteEditorModal').dataset.editSiteId;
+        document.querySelector('#siteEditorModal button[id="saveSiteBtn"]').textContent = 'Save';
+        document.querySelector('#siteEditorModal button[id="saveSiteBtn"]').onclick = saveSiteEdits;
+
+        closeModal('siteEditorModal');
+        showToast('Site updated!', 'success');
+    } catch (e) {
+        console.error('Failed to update site', e);
+        showToast('Failed to update site', 'error');
+    }
+}
+
+async function duplicateSite(siteId) {
+    const site = allSites.find(s => s.id === siteId);
+    if (!site) return;
+
+    const name = prompt('New site name:', site.name + ' (Copy)');
+    if (!name) return;
+
+    try {
+        const resp = await fetch('/api/sites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                description: site.description,
+                type: site.type
+            })
+        });
+
+        if (resp.ok) {
+            const newSite = await resp.json();
+            allSites.push(newSite);
+            renderSitesList();
+            showToast('Site duplicated!', 'success');
+        } else {
+            showToast('Failed to duplicate site', 'error');
+        }
+    } catch (e) {
+        console.error('Duplicate site error:', e);
+        showToast('Failed to duplicate site', 'error');
+    }
+}
+
+async function publishSite(siteId) {
+    try {
+        await fetch(`/api/sites/${siteId}/publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visibility: 'public' })
+        });
+        showToast('Site published');
+    } catch (err) {
+        console.error('Publish site error:', err);
+        showToast('Failed to publish site', 'error');
+    }
+}
+
+async function deleteSite(siteId) {
+    try {
+        await fetch(`/api/sites/${siteId}`, {
+            method: 'DELETE'
+        });
+        showToast('Site deleted');
+        await loadSites();
+        if (currentSite && currentSite.id === siteId) {
+            currentSite = null;
+            currentNode = null;
+            document.getElementById('editor').value = '';
+            document.getElementById('breadcrumb').innerHTML = '<span>Veil</span>';
+        }
+    } catch (err) {
+        console.error('Delete site error:', err);
+        showToast('Failed to delete site', 'error');
+    }
+}
+
+// ====== TERMINAL SCRIPTING FUNCTIONS ======
+
+function openTerminalModal() {
+    // Reset form
+    document.getElementById('terminalActionSelect').value = 'execute';
+    document.getElementById('terminalWorkingDir').value = './';
+    document.getElementById('terminalCommand').value = '';
+    document.getElementById('terminalEnv').value = '';
+    document.getElementById('terminalOutput').innerHTML = '<div class="text-slate-500">Ready to execute commands...</div>';
+
+    // Show execute fields by default
+    showTerminalFields('execute');
+
+    // Hook up action change listener
+    document.getElementById('terminalActionSelect').addEventListener('change', function(e) {
+        showTerminalFields(e.target.value);
+    });
+
+    openModal('terminalModal');
+}
+
+function showTerminalFields(action) {
+    // Hide all field groups
+    const fieldGroups = ['executeFields', 'installFields', 'generateFields', 'testFields', 'buildFields', 'dependenciesFields'];
+    fieldGroups.forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+
+    // Show relevant fields
+    switch(action) {
+        case 'execute':
+            document.getElementById('executeFields').classList.remove('hidden');
+            break;
+        case 'install_package':
+            document.getElementById('installFields').classList.remove('hidden');
+            break;
+        case 'generate_code':
+            document.getElementById('generateFields').classList.remove('hidden');
+            break;
+        case 'run_tests':
+            document.getElementById('testFields').classList.remove('hidden');
+            break;
+        case 'build_project':
+            document.getElementById('buildFields').classList.remove('hidden');
+            break;
+        case 'check_dependencies':
+            document.getElementById('dependenciesFields').classList.remove('hidden');
+            break;
+    }
+}
+
+async function executeTerminalAction() {
+    const action = document.getElementById('terminalActionSelect').value;
+    const workingDir = document.getElementById('terminalWorkingDir').value || './';
+
+    const outputEl = document.getElementById('terminalOutput');
+    outputEl.innerHTML = '<div class="text-yellow-400">Executing...</div>';
+
+    try {
+        let payload = { working_directory: workingDir };
+
+        switch(action) {
+            case 'execute':
+                payload.command = document.getElementById('terminalCommand').value;
+                if (document.getElementById('terminalEnv').value.trim()) {
+                    const envLines = document.getElementById('terminalEnv').value.trim().split('\n');
+                    const env = {};
+                    envLines.forEach(line => {
+                        const [key, ...valueParts] = line.split('=');
+                        if (key && valueParts.length > 0) {
+                            env[key.trim()] = valueParts.join('=').trim();
+                        }
+                    });
+                    payload.environment = env;
+                }
+                break;
+
+            case 'install_package':
+                payload.manager = document.getElementById('packageManager').value;
+                payload.packages = document.getElementById('packageNames').value.split(',').map(p => p.trim()).filter(p => p);
+                break;
+
+            case 'generate_code':
+                payload.template = document.getElementById('codeTemplate').value;
+                payload.name = document.getElementById('codeName').value;
+                payload.directory = document.getElementById('codeDirectory').value;
+                break;
+
+            case 'run_tests':
+                payload.type = document.getElementById('testProjectType').value;
+                break;
+
+            case 'build_project':
+                payload.type = document.getElementById('buildProjectType').value;
+                break;
+
+            case 'check_dependencies':
+                payload.dependencies = document.getElementById('dependenciesList').value.split(',').map(d => d.trim()).filter(d => d);
+                break;
+        }
+
+        const response = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'terminal',
+                action: action,
+                payload: payload
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result) {
+            displayTerminalResult(result);
+        } else {
+            outputEl.innerHTML = `<div class="text-red-400">Error: ${result?.error || 'Unknown error'}</div>`;
+        }
+
+    } catch (error) {
+        console.error('Terminal execution error:', error);
+        outputEl.innerHTML = `<div class="text-red-400">Error: ${error.message}</div>`;
+    }
+}
+
+function displayTerminalResult(result) {
+    const outputEl = document.getElementById('terminalOutput');
+
+    if (result.success) {
+        let html = '<div class="text-green-400 mb-2">✓ Command executed successfully</div>';
+
+        if (result.output) {
+            html += `<div class="text-slate-300 whitespace-pre-wrap">${escapeHtml(result.output)}</div>`;
+        }
+
+        if (result.files) {
+            html += '<div class="text-blue-400 mt-2">Generated files:</div>';
+            Object.keys(result.files).forEach(filename => {
+                html += `<div class="text-slate-300 ml-2">• ${filename}</div>`;
+            });
+        }
+
+        if (result.dependencies) {
+            html += '<div class="text-blue-400 mt-2">Dependencies check:</div>';
+            Object.entries(result.dependencies).forEach(([dep, installed]) => {
+                const status = installed ? '<span class="text-green-400">✓</span>' : '<span class="text-red-400">✗</span>';
+                html += `<div class="text-slate-300 ml-2">${status} ${dep}</div>`;
+            });
+        }
+
+        outputEl.innerHTML = html;
+    } else {
+        let html = '<div class="text-red-400 mb-2">✗ Command failed</div>';
+
+        if (result.error) {
+            html += `<div class="text-red-300">${escapeHtml(result.error)}</div>`;
+        }
+
+        if (result.output) {
+            html += `<div class="text-slate-300 whitespace-pre-wrap">${escapeHtml(result.output)}</div>`;
+        }
+
+        if (result.exit_code !== undefined) {
+            html += `<div class="text-yellow-400">Exit code: ${result.exit_code}</div>`;
+        }
+
+        outputEl.innerHTML = html;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ====== REMINDER SYSTEM FUNCTIONS ======
+
+function openReminderModal() {
+    openModal('reminderModal');
+    loadReminders();
+}
+
+async function loadReminders() {
+    try {
+        const resp = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'list',
+                payload: {}
+            })
+        });
+
+        const reminders = await resp.json();
+        const list = document.getElementById('remindersList');
+
+        if (!reminders || reminders.length === 0) {
+            list.innerHTML = '<div class="text-slate-500 text-sm">No reminders yet</div>';
+            return;
+        }
+
+        list.innerHTML = reminders.map(r => `
+            <div class="reminder-item p-3 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition cursor-pointer" data-reminder-id="${r.id}">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="font-medium text-sm">${r.title}</div>
+                        <div class="text-xs text-slate-500">${new Date(r.remind_at * 1000).toLocaleString()}</div>
+                        <div class="text-xs text-slate-600 mt-1">${r.description || ''}</div>
+                        <div class="text-xs text-slate-400 mt-1">Status: ${r.status} | Recurrence: ${r.recurrence}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="dismissReminder('${r.id}')" class="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">Dismiss</button>
+                        <button onclick="snoozeReminder('${r.id}')" class="px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700">Snooze</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+        // Attach context menu event listeners
+        document.querySelectorAll('.reminder-item').forEach((item, index) => {
+            item.addEventListener('contextmenu', (e) => showReminderContextMenu(e, reminders[index].id));
+        });
+    } catch (e) {
+        console.error('Failed to load reminders:', e);
+        document.getElementById('remindersList').innerHTML = '<div class="text-red-500 text-sm">Failed to load reminders</div>';
+    }
+}
+
+async function createReminder() {
+    const title = document.getElementById('reminderTitle').value;
+    const dateTime = document.getElementById('reminderDateTime').value;
+    const description = document.getElementById('reminderDescription').value;
+    const recurrence = document.getElementById('reminderRecurrence').value;
+
+    if (!title || !dateTime) {
+        alert('Title and date/time are required');
+        return;
+    }
+
+    const remindAt = new Date(dateTime).getTime() / 1000;
+
+    try {
+        await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'create',
+                payload: {
+                    title,
+                    description,
+                    remind_at: remindAt,
+                    recurrence
+                }
+            })
+        });
+
+        // Clear form
+        document.getElementById('reminderTitle').value = '';
+        document.getElementById('reminderDateTime').value = '';
+        document.getElementById('reminderDescription').value = '';
+        document.getElementById('reminderRecurrence').value = 'none';
+
+        loadReminders();
+        showToast('Reminder created!', 'success');
+    } catch (e) {
+        console.error('Failed to create reminder:', e);
+        showToast('Failed to create reminder', 'error');
+    }
+}
+
+async function dismissReminder(id) {
+    try {
+        await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'dismiss',
+                payload: { id }
+            })
+        });
+
+        loadReminders();
+        showToast('Reminder dismissed', 'success');
+    } catch (e) {
+        console.error('Failed to dismiss reminder:', e);
+        showToast('Failed to dismiss reminder', 'error');
+    }
+}
+
+async function snoozeReminder(id, minutes = null) {
+    if (minutes === null) {
+        minutes = prompt('Snooze for how many minutes?', '15');
+        if (!minutes || isNaN(parseInt(minutes))) return;
+    }
+
+    try {
+        await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'snooze',
+                payload: { id, snooze_minutes: parseInt(minutes) }
+            })
+        });
+
+        loadReminders();
+        showToast(`Reminder snoozed for ${minutes} minutes`, 'success');
+    } catch (e) {
+        console.error('Failed to snooze reminder:', e);
+        showToast('Failed to snooze reminder', 'error');
+    }
+}
+
+// ====== REMINDER CONTEXT MENU FUNCTIONS ======
+
+let reminderContextMenu = null;
+
+function createReminderContextMenu() {
+    if (reminderContextMenu) {
+        reminderContextMenu.remove();
+    }
+
+    reminderContextMenu = document.createElement('div');
+    reminderContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    reminderContextMenu.style.minWidth = '200px';
+    reminderContextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="dismiss">
+            <i class="fas fa-check mr-2"></i>Dismiss
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="snooze-15">
+            <i class="fas fa-clock mr-2"></i>Snooze 15 min
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="snooze-30">
+            <i class="fas fa-clock mr-2"></i>Snooze 30 min
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="snooze-60">
+            <i class="fas fa-clock mr-2"></i>Snooze 1 hour
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="snooze-custom">
+            <i class="fas fa-clock mr-2"></i>Snooze Custom...
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="edit">
+            <i class="fas fa-edit mr-2"></i>Edit
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
+            <i class="fas fa-trash mr-2"></i>Delete
+        </div>
+    `;
+
+    document.body.appendChild(reminderContextMenu);
+
+    // Handle menu actions
+    reminderContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleReminderContextMenuAction);
+    });
+
+    return reminderContextMenu;
+}
+
+function showReminderContextMenu(e, reminderId) {
+    e.preventDefault();
+
+    if (!reminderContextMenu) {
+        createReminderContextMenu();
+    }
+
+    reminderContextMenu.dataset.reminderId = reminderId;
+    reminderContextMenu.style.left = e.pageX + 'px';
+    reminderContextMenu.style.top = e.pageY + 'px';
+    reminderContextMenu.classList.remove('hidden');
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideReminderContextMenu);
+    }, 10);
+}
+
+function hideReminderContextMenu() {
+    if (reminderContextMenu) {
+        reminderContextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hideReminderContextMenu);
+}
+
+async function handleReminderContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const reminderId = reminderContextMenu.dataset.reminderId;
+
+    hideReminderContextMenu();
+
+    switch(action) {
+        case 'dismiss':
+            await dismissReminder(reminderId);
+            break;
+        case 'snooze-15':
+            await snoozeReminder(reminderId, 15);
+            break;
+        case 'snooze-30':
+            await snoozeReminder(reminderId, 30);
+            break;
+        case 'snooze-60':
+            await snoozeReminder(reminderId, 60);
+            break;
+        case 'snooze-custom':
+            await snoozeReminder(reminderId);
+            break;
+        case 'edit':
+            await editReminder(reminderId);
+            break;
+        case 'delete':
+            if (confirm('Are you sure you want to delete this reminder?')) {
+                await deleteReminder(reminderId);
+            }
+            break;
+    }
+}
+
+async function editReminder(id) {
+    // Load reminder details and populate form for editing
+    try {
+        const resp = await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'get',
+                payload: { id }
+            })
+        });
+
+        const reminder = await resp.json();
+        if (reminder) {
+            // Populate form with existing data
+            document.getElementById('reminderTitle').value = reminder.title || '';
+            document.getElementById('reminderDescription').value = reminder.description || '';
+            document.getElementById('reminderRecurrence').value = reminder.recurrence || 'none';
+
+            // Convert timestamp to datetime-local format
+            const date = new Date(reminder.remind_at * 1000);
+            const datetimeLocal = date.toISOString().slice(0, 16);
+            document.getElementById('reminderDateTime').value = datetimeLocal;
+
+            // Store reminder ID for update
+            document.getElementById('reminderModal').dataset.editId = id;
+
+            // Change button text
+            document.querySelector('#reminderModal button[onclick*="createReminder"]').textContent = 'Update Reminder';
+            document.querySelector('#reminderModal button[onclick*="createReminder"]').onclick = () => updateReminder(id);
+
+            openModal('reminderModal');
+        }
+    } catch (e) {
+        console.error('Failed to load reminder for editing:', e);
+        showToast('Failed to load reminder', 'error');
+    }
+}
+
+async function updateReminder(id) {
+    const title = document.getElementById('reminderTitle').value;
+    const dateTime = document.getElementById('reminderDateTime').value;
+    const description = document.getElementById('reminderDescription').value;
+    const recurrence = document.getElementById('reminderRecurrence').value;
+
+    if (!title || !dateTime) {
+        alert('Title and date/time are required');
+        return;
+    }
+
+    const remindAt = new Date(dateTime).getTime() / 1000;
+
+    try {
+        await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'update',
+                payload: {
+                    id,
+                    title,
+                    description,
+                    remind_at: remindAt,
+                    recurrence
+                }
+            })
+        });
+
+        // Clear form and reset
+        document.getElementById('reminderTitle').value = '';
+        document.getElementById('reminderDateTime').value = '';
+        document.getElementById('reminderDescription').value = '';
+        document.getElementById('reminderRecurrence').value = 'none';
+        delete document.getElementById('reminderModal').dataset.editId;
+
+        // Reset button
+        document.querySelector('#reminderModal button[onclick*="updateReminder"]').textContent = 'Create Reminder';
+        document.querySelector('#reminderModal button[onclick*="updateReminder"]').onclick = createReminder;
+
+        loadReminders();
+        closeModal('reminderModal');
+        showToast('Reminder updated!', 'success');
+    } catch (e) {
+        console.error('Failed to update reminder:', e);
+        showToast('Failed to update reminder', 'error');
+    }
+}
+
+async function deleteReminder(id) {
+    try {
+        await fetch('/api/plugin-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                plugin: 'reminder',
+                action: 'delete',
+                payload: { id }
+            })
+        });
+
+        loadReminders();
+        showToast('Reminder deleted', 'success');
+    } catch (e) {
+        console.error('Failed to delete reminder:', e);
+        showToast('Failed to delete reminder', 'error');
+    }
+}
+
+// Context menu for media
+let mediaContextMenu = null;
+
+function createMediaContextMenu() {
+    if (mediaContextMenu) {
+        mediaContextMenu.remove();
+    }
+
+    mediaContextMenu = document.createElement('div');
+    mediaContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    mediaContextMenu.style.minWidth = '200px';
+    mediaContextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="insert">
+            <i class="fas fa-plus mr-2"></i>Insert into Editor
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="copy-link">
+            <i class="fas fa-link mr-2"></i>Copy Link
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="download">
+            <i class="fas fa-download mr-2"></i>Download
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
+            <i class="fas fa-trash mr-2"></i>Delete
+        </div>
+    `;
+
+    document.body.appendChild(mediaContextMenu);
+
+    // Handle menu actions
+    mediaContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleMediaContextMenuAction);
+    });
+
+    return mediaContextMenu;
+}
+
+function showMediaContextMenu(e, mediaId) {
+    e.preventDefault();
+
+    if (!mediaContextMenu) {
+        createMediaContextMenu();
+    }
+
+    mediaContextMenu.dataset.mediaId = mediaId;
+    mediaContextMenu.style.left = e.pageX + 'px';
+    mediaContextMenu.style.top = e.pageY + 'px';
+    mediaContextMenu.classList.remove('hidden');
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideMediaContextMenu);
+    }, 10);
+}
+
+function hideMediaContextMenu() {
+    if (mediaContextMenu) {
+        mediaContextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hideMediaContextMenu);
+}
+
+async function handleMediaContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const mediaId = mediaContextMenu.dataset.mediaId;
+
+    hideMediaContextMenu();
+
+    // Find media item
+    const mediaItem = document.querySelector(`[data-media-id="${mediaId}"]`);
+    if (!mediaItem) return;
+
+    const url = mediaItem.dataset.mediaUrl;
+    const filename = mediaItem.dataset.mediaFilename;
+
+    switch(action) {
+        case 'insert':
+            insertMediaIntoEditor(url, filename);
+            break;
+        case 'copy-link':
+            navigator.clipboard.writeText(url);
+            showToast('Link copied to clipboard');
+            break;
+        case 'download':
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            break;
+        case 'delete':
+            if (confirm('Are you sure you want to delete this media file?')) {
+                await deleteMedia(mediaId);
+            }
+            break;
+    }
+}
+
+async function deleteMedia(mediaId) {
+    try {
+        const response = await fetch(`/api/media/${mediaId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            showToast('Media deleted');
+            loadMediaLibrary();
+        } else {
+            showToast('Failed to delete media', 'error');
+        }
+    } catch (e) {
+        console.error('Delete media error:', e);
+        showToast('Failed to delete media', 'error');
+    }
+}
+
+// Context menu for versions
+let versionContextMenu = null;
+
+function createVersionContextMenu() {
+    if (versionContextMenu) {
+        versionContextMenu.remove();
+    }
+
+    versionContextMenu = document.createElement('div');
+    versionContextMenu.className = 'fixed bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 hidden';
+    versionContextMenu.style.minWidth = '200px';
+    versionContextMenu.innerHTML = `
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="restore">
+            <i class="fas fa-undo mr-2"></i>Restore
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="compare">
+            <i class="fas fa-exchange-alt mr-2"></i>Compare
+        </div>
+        <div class="context-menu-item px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm" data-action="export">
+            <i class="fas fa-download mr-2"></i>Export
+        </div>
+        <hr class="my-1">
+        <div class="context-menu-item px-4 py-2 hover:bg-red-100 text-red-600 cursor-pointer text-sm" data-action="delete">
+            <i class="fas fa-trash mr-2"></i>Delete
+        </div>
+    `;
+
+    document.body.appendChild(versionContextMenu);
+
+    // Handle menu actions
+    versionContextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', handleVersionContextMenuAction);
+    });
+
+    return versionContextMenu;
+}
+
+function showVersionContextMenu(e, versionId) {
+    e.preventDefault();
+
+    if (!versionContextMenu) {
+        createVersionContextMenu();
+    }
+
+    versionContextMenu.dataset.versionId = versionId;
+    versionContextMenu.style.left = e.pageX + 'px';
+    versionContextMenu.style.top = e.pageY + 'px';
+    versionContextMenu.classList.remove('hidden');
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideVersionContextMenu);
+    }, 10);
+}
+
+function hideVersionContextMenu() {
+    if (versionContextMenu) {
+        versionContextMenu.classList.add('hidden');
+    }
+    document.removeEventListener('click', hideVersionContextMenu);
+}
+
+async function handleVersionContextMenuAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const versionId = versionContextMenu.dataset.versionId;
+
+    hideVersionContextMenu();
+
+    switch(action) {
+        case 'restore':
+            await rollbackVersion(versionId);
+            break;
+        case 'compare':
+            await compareVersion(versionId);
+            break;
+        case 'export':
+            window.location.href = `/api/export?version_id=${versionId}`;
+            break;
+        case 'delete':
+            if (confirm('Are you sure you want to delete this version?')) {
+                await deleteVersion(versionId);
+            }
+            break;
+    }
+}
+
+async function compareVersion(versionId) {
+    // Open comparison modal or show diff
+    alert('Version comparison - Feature coming soon!');
+}
+
+async function deleteVersion(versionId) {
+    try {
+        await fetch(`/api/sites/${currentSite.id}/nodes/${currentNode.id}/versions/${versionId}`, {
+            method: 'DELETE'
+        });
+        showToast('Version deleted');
+        showVersions(); // Refresh versions list
+    } catch (err) {
+        console.error('Delete version error:', err);
+        showToast('Failed to delete version', 'error');
+    }
+}

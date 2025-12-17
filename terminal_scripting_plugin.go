@@ -14,6 +14,8 @@ import (
 
 // TerminalScriptingPlugin handles shell script execution, package installation, and code generation
 type TerminalScriptingPlugin struct {
+	name            string
+	version         string
 	allowedCommands map[string]bool
 	safeMode        bool
 }
@@ -77,6 +79,30 @@ func (tsp *TerminalScriptingPlugin) Initialize(config map[string]interface{}) er
 	}
 
 	log.Printf("Terminal scripting plugin initialized (safe mode: %v)", tsp.safeMode)
+	return nil
+}
+
+// Name returns the plugin name
+func (tsp *TerminalScriptingPlugin) Name() string {
+	return "terminal"
+}
+
+// Version returns the plugin version
+func (tsp *TerminalScriptingPlugin) Version() string {
+	return "1.0.0"
+}
+
+// Validate checks if the plugin is properly configured
+func (tsp *TerminalScriptingPlugin) Validate() error {
+	if tsp.allowedCommands == nil {
+		return fmt.Errorf("allowed commands not initialized")
+	}
+	return nil
+}
+
+// Shutdown cleans up plugin resources
+func (tsp *TerminalScriptingPlugin) Shutdown() error {
+	log.Printf("Terminal scripting plugin shutting down")
 	return nil
 }
 

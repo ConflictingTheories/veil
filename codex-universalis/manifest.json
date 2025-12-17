@@ -1,0 +1,80 @@
+{
+  "name": "Codex Universal",
+  "short_name": "Codex",
+  "description": "A distributed knowledge architecture for the age of AI. Create, annotate, and preserve cultural heritage texts with ontological precision.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4ede3",
+  "theme_color": "#1a1510",
+  "orientation": "any",
+  "categories": ["education", "productivity", "utilities"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "screenshot-2.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Text",
+      "short_name": "Text",
+      "description": "Add a new text fragment",
+      "url": "/?action=newText",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "New Entity",
+      "short_name": "Entity",
+      "description": "Create a new entity",
+      "url": "/?action=newEntity",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Sync",
+      "short_name": "Sync",
+      "description": "Synchronize with trusted authorities",
+      "url": "/?action=sync",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "file",
+          "accept": ["text/plain", "text/xml", "application/json"]
+        }
+      ]
+    }
+  }
+}

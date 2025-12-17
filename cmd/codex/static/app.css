@@ -1,0 +1,14 @@
+:root{--bg:#0b1220;--panel:#0f1724;--muted:#94a3b8;--accent:#4f46e5}
+body{font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,var(--bg),#071026);color:#e6eef8;margin:0}
+.container{max-width:1200px;margin:0 auto;padding:16px}
+.header{padding:12px 0}
+.header h1{margin:0;font-size:20px}
+.header .actions{display:flex;gap:8px}
+.main{display:grid;grid-template-columns:240px 1fr 320px;gap:16px;padding-top:16px}
+.panel{background:var(--panel);padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);margin-bottom:12px}
+.panel h3{margin:0 0 8px 0;font-size:14px;color:var(--muted)}
+input,select,button{display:block;width:100%;margin:6px 0;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.03);background:#071427;color:#e6eef8}
+button{cursor:pointer}
+#graphArea{min-height:420px;background:linear-gradient(180deg,#041226,#071026);border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.03)}
+#objectsList, #commitList{max-height:260px;overflow:auto;font-size:12px}
+#status{margin-bottom:12px}
